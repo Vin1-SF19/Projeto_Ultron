@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatPanel } from './ChatPanel.js';
@@ -38,6 +38,20 @@ class FakeWebSocket {
     this.emit('message', { data: JSON.stringify(data) });
   }
 }
+
+beforeEach(() => {
+  // Por padrão, /api/v1/voice/speak responde "não configurada" — cenário mais
+  // comum antes do usuário configurar uma voz. Testes específicos de voz
+  // sobrescrevem este mock.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: { code: 'voice_not_configured' } }),
+    }),
+  );
+});
 
 afterEach(() => {
   cleanup();
@@ -135,5 +149,52 @@ describe('ChatPanel', () => {
       response: { decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'm', reason: '', fallbackUsed: false }, content: 'x', latencyMs: 1 },
     });
     expect(onFaceEvent).toHaveBeenCalledWith('model_stream_done');
+  });
+
+  it('quando a voz está configurada, sintetiza a resposta e dispara voice.response.started/ended', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(['audio-fake'], { type: 'audio/mpeg' })) }),
+    );
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn().mockReturnValue('blob:fake-url'), revokeObjectURL: vi.fn() });
+
+    const fakeAudio = {
+      listeners: new Map<string, () => void>(),
+      addEventListener(type: string, listener: () => void) {
+        this.listeners.set(type, listener);
+      },
+      play: vi.fn().mockImplementation(() => new Promise<void>((resolve) => resolve())),
+      pause: vi.fn(),
+      src: 'blob:fake-url',
+    };
+    vi.stubGlobal(
+      'Audio',
+      vi.fn().mockImplementation(() => fakeAudio),
+    );
+
+    const user = userEvent.setup();
+    const onFaceEvent = vi.fn();
+    render(<ChatPanel onFaceEvent={onFaceEvent} />);
+
+    const ws = FakeWebSocket.instances[0]!;
+    ws.emitOpen();
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+
+    await user.type(screen.getByRole('textbox'), 'oi');
+    await user.click(screen.getByRole('button', { name: /enviar/i }));
+
+    const sentMessage = JSON.parse(ws.sent[0]!) as { requestId: string };
+    ws.emitMessage({
+      kind: 'model_stream_done',
+      requestId: sentMessage.requestId,
+      response: { decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'm', reason: '', fallbackUsed: false }, content: 'Olá!', latencyMs: 1 },
+    });
+
+    await waitFor(() => expect(onFaceEvent).toHaveBeenCalledWith('voice.response.started'));
+    expect(fakeAudio.play).toHaveBeenCalled();
+
+    fakeAudio.listeners.get('ended')?.();
+    expect(onFaceEvent).toHaveBeenCalledWith('voice.response.ended');
   });
 });

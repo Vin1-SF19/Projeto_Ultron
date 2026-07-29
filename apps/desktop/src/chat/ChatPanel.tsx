@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatSocket, type ChatSocketStatus } from './chat-socket.js';
 import type { ChatMessage } from './chat-types.js';
+import { synthesizeSpeech, VoiceNotConfiguredError } from './voice-client.js';
 import './chat.css';
 
 export interface ChatPanelProps {
@@ -17,6 +18,38 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        URL.revokeObjectURL(audioRef.current.src);
+      }
+    };
+  }, []);
+
+  function speak(text: string) {
+    synthesizeSpeech(text)
+      .then((url) => {
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        onFaceEvent?.('voice.response.started');
+        audio.addEventListener('ended', () => {
+          URL.revokeObjectURL(url);
+          onFaceEvent?.('voice.response.ended');
+        });
+        audio.addEventListener('error', () => {
+          URL.revokeObjectURL(url);
+          onFaceEvent?.('voice.response.error');
+        });
+        void audio.play();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof VoiceNotConfiguredError) return;
+        onFaceEvent?.('voice.response.error');
+      });
+  }
 
   useEffect(() => {
     const socket = new ChatSocket();
@@ -66,6 +99,9 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
               : m,
           ),
         );
+        if (response.content.trim()) {
+          speak(response.content);
+        }
       },
       onError: (message) => {
         onFaceEvent?.('model_stream_error');

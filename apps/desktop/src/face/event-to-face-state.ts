@@ -21,6 +21,8 @@ const EVENT_TYPE_TO_FACE_STATE: Record<string, FaceState> = {
   'approval.created': 'awaiting_approval',
   'system.offline': 'offline',
   'system.stopped': 'offline',
+  'voice.response.ended': 'idle',
+  'voice.response.error': 'error',
 };
 
 export function faceStateForEvent(eventType: string): FaceState | undefined {

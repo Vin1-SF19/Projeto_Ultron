@@ -21,6 +21,11 @@ describe('faceStateForEvent', () => {
     expect(faceStateForEvent('model_stream_error')).toBe('error');
   });
 
+  it('mapeia os eventos de reprodução de voz (TTS) usados pelo chat', () => {
+    expect(faceStateForEvent('voice.response.ended')).toBe('idle');
+    expect(faceStateForEvent('voice.response.error')).toBe('error');
+  });
+
   it('retorna undefined para eventos sem mapeamento — nunca inventa uma reação', () => {
     expect(faceStateForEvent('algum.evento.desconhecido')).toBeUndefined();
   });
