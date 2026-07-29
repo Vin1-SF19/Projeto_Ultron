@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import cors from '@fastify/cors';
@@ -469,6 +470,58 @@ export async function buildServer(deps: ServerDeps) {
         action: 'voice.spoken',
         outcome: 'failure',
         details: { characters: body.text.length, error: message },
+      });
+      throw new UltronError('voice_synthesis_failed', message, 502);
+    }
+  });
+
+  app.post('/api/v1/voice/speak/stream', async (request, reply) => {
+    const body = request.body as { text?: string };
+    if (!body?.text) {
+      throw new UltronError('invalid_request', 'Campo obrigatório: text', 400);
+    }
+
+    const apiKey = await deps.voiceConfigStore.getApiKey();
+    const voiceConfig = deps.voiceConfigStore.get();
+    if (!apiKey || !voiceConfig.voiceId) {
+      throw new UltronError('voice_not_configured', 'Voz ainda não configurada (defina em Configurações).', 400);
+    }
+
+    try {
+      const client = new ElevenLabsClient(apiKey);
+      const stream = await client.textToSpeechStream({ voiceId: voiceConfig.voiceId, text: body.text });
+
+      let audioBytes = 0;
+      const countingStream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const reader = stream.getReader();
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            audioBytes += value.length;
+            controller.enqueue(value);
+          }
+          controller.close();
+          deps.auditLog.record({
+            correlationId: request.correlationId,
+            actorType: 'user',
+            action: 'voice.spoken',
+            outcome: 'success',
+            details: { characters: body.text!.length, audioBytes, voiceId: voiceConfig.voiceId, streamed: true },
+          });
+        },
+      });
+
+      reply.header('content-type', 'audio/mpeg');
+      return reply.send(Readable.fromWeb(countingStream as import('stream/web').ReadableStream));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'voice.spoken',
+        outcome: 'failure',
+        details: { characters: body.text.length, error: message, streamed: true },
       });
       throw new UltronError('voice_synthesis_failed', message, 502);
     }

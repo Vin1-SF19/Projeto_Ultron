@@ -62,6 +62,32 @@ describe('ElevenLabsClient', () => {
     await expect(client.textToSpeech({ voiceId: 'abc123', text: 'oi' })).rejects.toThrow('401');
   });
 
+  it('textToSpeechStream() chama o endpoint /stream e retorna o ReadableStream bruto', async () => {
+    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new ElevenLabsClient(SECRET_KEY);
+    const stream = await client.textToSpeechStream({ voiceId: 'abc123', text: 'Olá' });
+
+    expect(stream).toBe(body);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/text-to-speech/abc123/stream');
+  });
+
+  it('textToSpeechStream() propaga erro real quando a API responde com falha', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('server error') }));
+
+    const client = new ElevenLabsClient(SECRET_KEY);
+    await expect(client.textToSpeechStream({ voiceId: 'abc123', text: 'oi' })).rejects.toThrow('500');
+  });
+
   it('speechToText() envia o áudio como multipart e retorna o texto transcrito', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

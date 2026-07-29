@@ -592,6 +592,62 @@ describe('control plane server', () => {
       expect(speakEntry?.details).toMatchObject({ characters: 'Ola mundo'.length, audioBytes: fakeAudioBytes.length });
     });
 
+    it('POST /api/v1/voice/speak/stream repassa o áudio incrementalmente e registra métricas ao final', async () => {
+      const streamChunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])];
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/v1/voices')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ voices: [] }) });
+        }
+        if (url.includes('/v1/text-to-speech') && url.includes('/stream')) {
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (const chunk of streamChunks) controller.enqueue(chunk);
+              controller.close();
+            },
+          });
+          return Promise.resolve({ ok: true, body });
+        }
+        return Promise.reject(new Error(`URL inesperada: ${url}`));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { app, auditLog } = await buildTestServer();
+
+      await app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings/voice',
+        payload: { apiKey: 'chave-valida', voiceId: 'abc123', voiceName: 'George' },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/voice/speak/stream',
+        payload: { text: 'Ola' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toBe('audio/mpeg');
+      expect(response.rawPayload.length).toBe(5); // 3 + 2 bytes dos chunks
+
+      const entries = auditLog.listRecent(10);
+      const speakEntry = entries.find((e) => e.action === 'voice.spoken');
+      expect(speakEntry).toBeDefined();
+      expect(speakEntry?.details).toMatchObject({ characters: 'Ola'.length, audioBytes: 5, streamed: true });
+    });
+
+    it('POST /api/v1/voice/speak/stream retorna erro claro quando a voz não está configurada', async () => {
+      const { app } = await buildTestServer();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/voice/speak/stream',
+        payload: { text: 'Olá' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe('voice_not_configured');
+    });
+
     it('POST /api/v1/voice/transcribe registra bytes de áudio e idioma detectado no AuditLog', async () => {
       const fetchMock = vi.fn().mockImplementation((url: string) => {
         if (url.includes('/v1/voices')) {

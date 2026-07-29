@@ -97,6 +97,32 @@ export class ElevenLabsClient {
     return new Uint8Array(await response.arrayBuffer());
   }
 
+  /**
+   * Streaming real via /v1/text-to-speech/{voiceId}/stream (chunked,
+   * confirmado: primeiro byte chega em ~1ms). Retorna o ReadableStream bruto
+   * para o chamador repassar sem bufferizar tudo antes de responder.
+   */
+  async textToSpeechStream(options: TextToSpeechOptions, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const response = await fetch(`${this.baseUrl}/v1/text-to-speech/${options.voiceId}/stream`, {
+      method: 'POST',
+      headers: this.headers({ 'content-type': 'application/json' }),
+      body: JSON.stringify({
+        text: options.text,
+        model_id: options.modelId ?? 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: options.stability ?? 0.5,
+          similarity_boost: options.similarityBoost ?? 0.75,
+        },
+      }),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`ElevenLabs /v1/text-to-speech/stream respondeu ${response.status}: ${text}`);
+    }
+    return response.body;
+  }
+
   async speechToText(options: SpeechToTextOptions, signal?: AbortSignal): Promise<SpeechToTextResult> {
     const form = new FormData();
     form.append('model_id', 'scribe_v1');
