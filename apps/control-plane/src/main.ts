@@ -5,11 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
 import { EventBus } from '@ultron/event-bus';
 import { OpenClawAdapter } from '@ultron/openclaw-adapter';
+import { NativeRoutingEngine } from '@ultron/model-gateway';
+import { OllamaAdapter } from '@ultron/ollama-adapter';
 import { createLogger } from './logger.js';
 import { EventStore } from './event-store.js';
 import { AuditLog } from './audit-log.js';
 import { buildServer } from './server.js';
 import { loadOpenClawConfig } from './integrations-config.js';
+import { defaultRoutingProfiles } from './routing-config.js';
 
 const DATA_DIR = path.join(os.homedir(), '.ultron');
 const DB_FILE_PATH = path.join(DATA_DIR, 'ultron.sqlite');
@@ -53,12 +56,21 @@ async function main() {
     logger.info('OpenClaw desabilitado (defina OPENCLAW_GATEWAY_URL para habilitar)');
   }
 
+  const routingEngine = new NativeRoutingEngine({
+    profiles: defaultRoutingProfiles(),
+    adapters: new Map([['ollama', new OllamaAdapter()]]),
+    onDecision: (decision) => {
+      logger.info(decision, 'decisão de roteamento de modelo');
+    },
+  });
+
   const app = await buildServer({
     logger,
     eventStore,
     eventBus,
     auditLog,
     openClawAdapter,
+    routingEngine,
     dbFilePath: DB_FILE_PATH,
     startedAt,
   });

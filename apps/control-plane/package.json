@@ -16,6 +16,8 @@
     "@ultron/database": "workspace:*",
     "@ultron/event-bus": "workspace:*",
     "@ultron/openclaw-adapter": "workspace:*",
+    "@ultron/model-gateway": "workspace:*",
+    "@ultron/ollama-adapter": "workspace:*",
     "fastify": "^5.2.0",
     "@fastify/websocket": "^11.0.2",
     "pino": "^9.6.0",

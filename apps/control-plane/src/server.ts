@@ -3,6 +3,8 @@ import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@ultron/event-bus';
 import type { OpenClawAdapter } from '@ultron/openclaw-adapter';
+import type { RoutingEngine } from '@ultron/model-gateway';
+import { routingProfileIdSchema } from '@ultron/contracts';
 import type { Logger } from './logger.js';
 import type { EventStore } from './event-store.js';
 import type { AuditLog } from './audit-log.js';
@@ -15,6 +17,7 @@ export interface ServerDeps {
   eventBus: EventBus;
   auditLog: AuditLog;
   openClawAdapter: OpenClawAdapter;
+  routingEngine: RoutingEngine;
   dbFilePath: string;
   startedAt: Date;
 }
@@ -108,6 +111,72 @@ export async function buildServer(deps: ServerDeps) {
     }
     const health = await deps.openClawAdapter.health();
     return { state, health };
+  });
+
+  app.get('/api/v1/providers', async () => {
+    return { providers: await deps.routingEngine.listProviders() };
+  });
+
+  app.get('/api/v1/providers/health', async () => {
+    return await deps.routingEngine.health();
+  });
+
+  app.get('/api/v1/models', async () => {
+    return { models: await deps.routingEngine.listModels() };
+  });
+
+  app.post('/api/v1/models/route', async (request) => {
+    const body = request.body as { profileId?: string; message?: string };
+    const profileId = routingProfileIdSchema.safeParse(body?.profileId);
+    if (!profileId.success || !body?.message) {
+      throw new UltronError('invalid_request', 'Campos obrigatórios: profileId (válido), message', 400);
+    }
+
+    try {
+      const decision = await deps.routingEngine.route({
+        profileId: profileId.data,
+        messages: [{ role: 'user', content: body.message }],
+      });
+      return { decision };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new UltronError('routing_failed', message, 503);
+    }
+  });
+
+  app.post('/api/v1/models/execute', async (request) => {
+    const body = request.body as { profileId?: string; message?: string };
+    const profileId = routingProfileIdSchema.safeParse(body?.profileId);
+    if (!profileId.success || !body?.message) {
+      throw new UltronError('invalid_request', 'Campos obrigatórios: profileId (válido), message', 400);
+    }
+
+    try {
+      const response = await deps.routingEngine.execute({
+        profileId: profileId.data,
+        messages: [{ role: 'user', content: body.message }],
+      });
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'model.execute',
+        outcome: 'success',
+        targetType: 'model',
+        targetId: response.decision.modelId,
+        details: { profileId: profileId.data, providerId: response.decision.providerId },
+      });
+      return response;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'model.execute',
+        outcome: 'failure',
+        details: { profileId: profileId.data, error: message },
+      });
+      throw new UltronError('routing_failed', message, 503);
+    }
   });
 
   app.get('/ws', { websocket: true }, (socket, request) => {
