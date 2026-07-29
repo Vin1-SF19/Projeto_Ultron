@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capacidades padrão da janela principal do Ultron",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open"]
+}
