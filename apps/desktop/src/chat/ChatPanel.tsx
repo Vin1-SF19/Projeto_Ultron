@@ -23,6 +23,7 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
   const [showTextChat, setShowTextChat] = useState(false);
   const [micState, setMicState] = useState<MicState>('idle');
   const [micError, setMicError] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<VoiceRecorder | undefined>(undefined);
@@ -31,30 +32,49 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
     recorderRef.current = new VoiceRecorder();
     return () => {
       recorderRef.current?.cancel();
-      if (audioRef.current) {
-        audioRef.current.pause();
-        URL.revokeObjectURL(audioRef.current.src);
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        URL.revokeObjectURL(audio.src);
       }
     };
   }, []);
+
+  /** Interrompe a fala em andamento (se houver) — nunca sobrepor voz do usuário com a do assistente. */
+  function stopSpeaking() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    URL.revokeObjectURL(audio.src);
+    audioRef.current = null;
+    setIsSpeaking(false);
+    onFaceEvent?.('voice.response.ended');
+  }
 
   function speak(text: string) {
     synthesizeSpeech(text)
       .then((url) => {
         const audio = new Audio(url);
         audioRef.current = audio;
+        setIsSpeaking(true);
         onFaceEvent?.('voice.response.started');
         audio.addEventListener('ended', () => {
           URL.revokeObjectURL(url);
+          audioRef.current = null;
+          setIsSpeaking(false);
           onFaceEvent?.('voice.response.ended');
         });
         audio.addEventListener('error', () => {
           URL.revokeObjectURL(url);
+          audioRef.current = null;
+          setIsSpeaking(false);
           onFaceEvent?.('voice.response.error');
         });
         audio.play().catch((error: unknown) => {
           console.error('Falha ao reproduzir áudio de voz:', error);
           URL.revokeObjectURL(url);
+          audioRef.current = null;
+          setIsSpeaking(false);
           onFaceEvent?.('voice.response.error');
         });
       })
@@ -141,6 +161,7 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
   async function handleMicClick() {
     if (micState === 'idle') {
       setMicError(null);
+      stopSpeaking();
       try {
         await recorderRef.current?.start();
         setMicState('recording');
@@ -193,6 +214,12 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
         >
           {micState === 'recording' ? '⏹ Ouvindo…' : micState === 'transcribing' ? '… Transcrevendo' : '🎤 Falar'}
         </button>
+
+        {isSpeaking && (
+          <button type="button" className="chat-panel__stop-speaking" onClick={stopSpeaking} aria-label="Parar de falar">
+            ⏹ Parar de falar
+          </button>
+        )}
 
         {micError && (
           <div className="chat-panel__mic-error" role="alert">

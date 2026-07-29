@@ -51,6 +51,21 @@
   font-size: 0.85em;
 }
 
+.chat-panel__stop-speaking {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid #e5484d;
+  background: transparent;
+  color: #e5484d;
+  font-weight: 600;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.chat-panel__stop-speaking:hover {
+  background: rgba(229, 72, 77, 0.1);
+}
+
 .chat-panel__toggle-text {
   margin-left: auto;
   font-size: 0.8em;

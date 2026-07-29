@@ -60,6 +60,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   FakeWebSocket.instances = [];
 });
 
@@ -214,6 +215,93 @@ describe('ChatPanel', () => {
 
     fakeAudio.listeners.get('ended')?.();
     expect(onFaceEvent).toHaveBeenCalledWith('voice.response.ended');
+  });
+
+  describe('interrupção de fala', () => {
+    function stubSpeakingAudio() {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(['audio-fake'], { type: 'audio/mpeg' })) }),
+      );
+      vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn().mockReturnValue('blob:fake-url'), revokeObjectURL: vi.fn() });
+
+      const fakeAudio = {
+        listeners: new Map<string, () => void>(),
+        addEventListener(type: string, listener: () => void) {
+          this.listeners.set(type, listener);
+        },
+        play: vi.fn().mockImplementation(() => Promise.resolve()),
+        pause: vi.fn(),
+        src: 'blob:fake-url',
+      };
+      vi.stubGlobal('Audio', vi.fn().mockImplementation(() => fakeAudio));
+      return fakeAudio;
+    }
+
+    async function triggerSpeaking(user: ReturnType<typeof userEvent.setup>, ws: FakeWebSocket, onFaceEvent: ReturnType<typeof vi.fn>) {
+      await enableTextChat(user);
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+      await user.type(screen.getByRole('textbox'), 'oi');
+      await user.click(screen.getByRole('button', { name: /enviar/i }));
+      const sentMessage = JSON.parse(ws.sent[0]!) as { requestId: string };
+      ws.emitMessage({
+        kind: 'model_stream_done',
+        requestId: sentMessage.requestId,
+        response: { decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'm', reason: '', fallbackUsed: false }, content: 'Olá!', latencyMs: 1 },
+      });
+      await waitFor(() => expect(onFaceEvent).toHaveBeenCalledWith('voice.response.started'));
+    }
+
+    it('mostra o botão "Parar de falar" enquanto o áudio toca, e ele interrompe a reprodução', async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      const fakeAudio = stubSpeakingAudio();
+      const user = userEvent.setup();
+      const onFaceEvent = vi.fn();
+      render(<ChatPanel onFaceEvent={onFaceEvent} />);
+      const ws = FakeWebSocket.instances[0]!;
+      ws.emitOpen();
+
+      await triggerSpeaking(user, ws, onFaceEvent);
+
+      const stopButton = screen.getByRole('button', { name: /parar de falar/i });
+      await user.click(stopButton);
+
+      expect(fakeAudio.pause).toHaveBeenCalled();
+      expect(onFaceEvent).toHaveBeenCalledWith('voice.response.ended');
+      expect(screen.queryByRole('button', { name: /parar de falar/i })).toBeNull();
+    });
+
+    it('clicar no microfone enquanto o Ultron fala interrompe a fala automaticamente antes de gravar', async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      const fakeAudio = stubSpeakingAudio();
+      const track = { stop: vi.fn() };
+      const stream = { getTracks: () => [track] } as unknown as MediaStream;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      });
+      class FakeMediaRecorder {
+        static isTypeSupported = vi.fn().mockReturnValue(true);
+        addEventListener() {}
+        start() {}
+        stop() {}
+      }
+      vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
+
+      const user = userEvent.setup();
+      const onFaceEvent = vi.fn();
+      render(<ChatPanel onFaceEvent={onFaceEvent} />);
+      const ws = FakeWebSocket.instances[0]!;
+      ws.emitOpen();
+
+      await triggerSpeaking(user, ws, onFaceEvent);
+      expect(screen.getByRole('button', { name: /parar de falar/i })).toBeDefined();
+
+      await user.click(screen.getByRole('button', { name: /falar com o ultron/i }));
+
+      expect(fakeAudio.pause).toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: /parar de falar/i })).toBeNull();
+    });
   });
 
   describe('conversa por voz (microfone)', () => {
