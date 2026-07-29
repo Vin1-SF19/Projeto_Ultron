@@ -1,0 +1,23 @@
+{
+  "name": "@ultron/openclaw-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ultron/contracts": "workspace:*",
+    "@openclaw/gateway-client": "2026.7.2-beta.5",
+    "@openclaw/gateway-protocol": "2026.7.2-beta.5"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0",
+    "typescript": "^5.7.0"
+  }
+}

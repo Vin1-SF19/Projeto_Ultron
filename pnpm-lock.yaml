@@ -44,6 +44,9 @@ importers:
       '@ultron/event-bus':
         specifier: workspace:*
         version: link:../../packages/event-bus
+      '@ultron/openclaw-adapter':
+        specifier: workspace:*
+        version: link:../../packages/openclaw-adapter
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
@@ -143,6 +146,25 @@ importers:
 
   packages/event-bus:
     dependencies:
+      '@ultron/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
+  packages/openclaw-adapter:
+    dependencies:
+      '@openclaw/gateway-client':
+        specifier: 2026.7.2-beta.5
+        version: 2026.7.2-beta.5
+      '@openclaw/gateway-protocol':
+        specifier: 2026.7.2-beta.5
+        version: 2026.7.2-beta.5
       '@ultron/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -818,6 +840,14 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@openclaw/gateway-client@2026.7.2-beta.5':
+    resolution: {integrity: sha512-dr36QNztu1BetFnb+vOuqa2QuQ6m7wD1ZSRmtA+tcmCUVgWGBrWaNW570aoBPofB7BxJ8F7USmlvjaxyhboS9Q==}
+    engines: {node: '>=22.19.0'}
+
+  '@openclaw/gateway-protocol@2026.7.2-beta.5':
+    resolution: {integrity: sha512-/gMRJsruvVAbPqWMQR3kz2u3K+0Y0oXe5ZXK5xvbj5i7wAZK+B4QW5khRBIwYnrhTxPa9IbLJUgUNlomhx/wbw==}
+    engines: {node: '>=22.19.0'}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -2116,6 +2146,9 @@ packages:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
 
+  typebox@1.3.6:
+    resolution: {integrity: sha512-Sc8RA0NCMEFmApHNU9ZMzqcpQj46She44J8ffpLM/bdhLNUZKq7DJumcLcsFx1gRmDfQPgCgOmFFJ7rcnfWNyA==}
+
   typescript-eslint@8.65.0:
     resolution: {integrity: sha512-/ggrHAwyjENDusvyxbuqxAC2dTnZg/Z8F+fgQtYIz+L6n/9HfSlEZcFGV/NsMNa6CkGk0xUjUAFwC0vHOflvIA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
@@ -2810,6 +2843,19 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@openclaw/gateway-client@2026.7.2-beta.5':
+    dependencies:
+      '@openclaw/gateway-protocol': 2026.7.2-beta.5
+      ipaddr.js: 2.4.0
+      ws: 8.21.1
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  '@openclaw/gateway-protocol@2026.7.2-beta.5':
+    dependencies:
+      typebox: 1.3.6
 
   '@pinojs/redact@0.4.0': {}
 
@@ -4112,6 +4158,8 @@ snapshots:
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
+
+  typebox@1.3.6: {}
 
   typescript-eslint@8.65.0(eslint@9.39.5)(typescript@5.9.3):
     dependencies:
