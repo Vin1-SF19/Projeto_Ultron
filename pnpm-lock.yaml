@@ -44,6 +44,12 @@ importers:
       '@ultron/event-bus':
         specifier: workspace:*
         version: link:../../packages/event-bus
+      '@ultron/model-gateway':
+        specifier: workspace:*
+        version: link:../../packages/model-gateway
+      '@ultron/ollama-adapter':
+        specifier: workspace:*
+        version: link:../../packages/ollama-adapter
       '@ultron/openclaw-adapter':
         specifier: workspace:*
         version: link:../../packages/openclaw-adapter
@@ -149,6 +155,35 @@ importers:
       '@ultron/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
+  packages/model-gateway:
+    dependencies:
+      '@ultron/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
+  packages/ollama-adapter:
+    dependencies:
+      '@ultron/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@ultron/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
     devDependencies:
       typescript:
         specifier: ^5.7.0
