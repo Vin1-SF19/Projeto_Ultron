@@ -486,4 +486,99 @@ describe('control plane server', () => {
     expect(body.error).toBeDefined();
     expect(body.error.correlationId).toBeTruthy();
   });
+
+  describe('/ws streaming de modelo (model_stream_*)', () => {
+    async function connectWs(routingEngineOverrides: Partial<RoutingEngine> = {}) {
+      const built = await buildTestServer(routingEngineOverrides);
+      const address = await built.app.listen({ port: 0, host: '127.0.0.1' });
+      const wsUrl = address.replace('http://', 'ws://') + '/ws';
+      const socket = new WebSocket(wsUrl);
+
+      // Fila todas as mensagens desde a conexão (inclusive o replay inicial),
+      // para nextMessage() nunca perder uma mensagem que chegou entre awaits.
+      const queue: Record<string, unknown>[] = [];
+      const waiters: Array<(msg: Record<string, unknown>) => void> = [];
+      socket.addEventListener('message', (event) => {
+        const parsed = JSON.parse(event.data as string) as Record<string, unknown>;
+        const waiter = waiters.shift();
+        if (waiter) waiter(parsed);
+        else queue.push(parsed);
+      });
+
+      await new Promise((resolve, reject) => {
+        socket.addEventListener('open', () => resolve(undefined), { once: true });
+        socket.addEventListener('error', reject, { once: true });
+      });
+
+      return { ...built, socket, queue, waiters };
+    }
+
+    function nextMessage(conn: { queue: Record<string, unknown>[]; waiters: Array<(msg: Record<string, unknown>) => void> }): Promise<Record<string, unknown>> {
+      const queued = conn.queue.shift();
+      if (queued) return Promise.resolve(queued);
+      return new Promise((resolve) => conn.waiters.push(resolve));
+    }
+
+    it('emite model_stream_token incrementalmente e depois model_stream_done', async () => {
+      const streamImpl = vi.fn(async (_request, callbacks: { onToken?: (t: string) => void; onDone?: (r: unknown) => void }) => {
+        callbacks.onToken?.('olá');
+        callbacks.onToken?.(' mundo');
+        callbacks.onDone?.({
+          decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'llama3.2:1b', reason: 'teste', fallbackUsed: false },
+          content: 'olá mundo',
+          latencyMs: 1,
+        });
+        return { cancel: () => {} };
+      });
+
+      const conn = await connectWs({ stream: streamImpl });
+
+      // primeira mensagem recebida ao conectar é sempre o replay inicial
+      await nextMessage(conn);
+
+      conn.socket.send(JSON.stringify({ kind: 'model_stream_start', requestId: 'req-1', profileId: 'chat-fast', text: 'oi' }));
+
+      const token1 = await nextMessage(conn);
+      expect(token1).toMatchObject({ kind: 'model_stream_token', requestId: 'req-1', token: 'olá' });
+
+      const token2 = await nextMessage(conn);
+      expect(token2).toMatchObject({ kind: 'model_stream_token', requestId: 'req-1', token: ' mundo' });
+
+      const done = await nextMessage(conn);
+      expect(done).toMatchObject({ kind: 'model_stream_done', requestId: 'req-1' });
+      expect((done.response as { content: string }).content).toBe('olá mundo');
+
+      conn.socket.close();
+    });
+
+    it('emite model_stream_error quando o provider falha, sem emitir model_stream_done', async () => {
+      const streamImpl = vi.fn(async (_request, callbacks: { onError?: (e: Error) => void }) => {
+        callbacks.onError?.(new Error('provider indisponível'));
+        return { cancel: () => {} };
+      });
+
+      const conn = await connectWs({ stream: streamImpl });
+      await nextMessage(conn);
+
+      conn.socket.send(JSON.stringify({ kind: 'model_stream_start', requestId: 'req-2', profileId: 'chat-fast', text: 'oi' }));
+
+      const error = await nextMessage(conn);
+      expect(error).toMatchObject({ kind: 'model_stream_error', requestId: 'req-2', message: 'provider indisponível' });
+
+      conn.socket.close();
+    });
+
+    it('rejeita model_stream_start sem campos obrigatórios com model_stream_error', async () => {
+      const conn = await connectWs();
+      await nextMessage(conn);
+
+      conn.socket.send(JSON.stringify({ kind: 'model_stream_start', requestId: 'req-3' }));
+
+      const error = await nextMessage(conn);
+      expect(error.kind).toBe('model_stream_error');
+      expect(error.requestId).toBe('req-3');
+
+      conn.socket.close();
+    });
+  });
 });

@@ -7,6 +7,20 @@ afterEach(() => {
 
 const SECRET_KEY = 'sk-nao-deve-vazar-jamais';
 
+/** Simula o corpo SSE de streaming (`data: {...}\n\n`, terminado por [DONE]). */
+function sseStreamBody(events: (object | '[DONE]')[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const event of events) {
+        const data = event === '[DONE]' ? '[DONE]' : JSON.stringify(event);
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      }
+      controller.close();
+    },
+  });
+}
+
 function makeAdapter() {
   return new OpenAiCompatibleAdapter({
     providerId: 'ollama-remote',
@@ -107,5 +121,37 @@ describe('OpenAiCompatibleAdapter', () => {
     const response = await adapter.execute({ profileId: 'chat-fast', messages: [{ role: 'user', content: 'oi' }] }, 'qwen3:14b');
 
     expect(response.estimatedCost).toBeUndefined();
+  });
+
+  it('executeStream() emite cada delta do SSE e agrega o conteúdo final', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: sseStreamBody([
+          { id: 'chatcmpl-1', choices: [{ delta: { content: 'Pa' } }] },
+          { id: 'chatcmpl-1', choices: [{ delta: { content: 'ris' } }] },
+          {
+            id: 'chatcmpl-1',
+            choices: [{ delta: {}, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 24, completion_tokens: 1, total_tokens: 25 },
+          },
+          '[DONE]',
+        ]),
+      }),
+    );
+
+    const adapter = makeAdapter();
+    const tokens: string[] = [];
+    const response = await adapter.executeStream(
+      { profileId: 'chat-fast', messages: [{ role: 'user', content: 'capital da frança?' }] },
+      'qwen3:14b',
+      (token) => tokens.push(token),
+    );
+
+    expect(tokens).toEqual(['Pa', 'ris']);
+    expect(response.content).toBe('Paris');
+    expect(response.tokensIn).toBe(24);
+    expect(response.tokensOut).toBe(1);
   });
 });

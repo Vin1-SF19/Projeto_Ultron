@@ -5,6 +5,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Simula o corpo NDJSON de streaming do Ollama como um ReadableStream real. */
+function ndjsonStreamBody(lines: object[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const line of lines) {
+        controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+      }
+      controller.close();
+    },
+  });
+}
+
 describe('OllamaAdapter', () => {
   it('descriptor() reporta provider local_runtime', () => {
     const adapter = new OllamaAdapter();
@@ -95,5 +108,52 @@ describe('OllamaAdapter', () => {
     await expect(
       adapter.execute({ profileId: 'chat-fast', messages: [{ role: 'user', content: 'oi' }] }, 'inexistente'),
     ).rejects.toThrow('404');
+  });
+
+  it('executeStream() emite cada token recebido do NDJSON e agrega o conteúdo final', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: ndjsonStreamBody([
+          { message: { role: 'assistant', content: 'olá' }, done: false },
+          { message: { role: 'assistant', content: ' mundo' }, done: false },
+          { message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: 3, eval_count: 2 },
+        ]),
+      }),
+    );
+
+    const adapter = new OllamaAdapter();
+    const tokens: string[] = [];
+    const response = await adapter.executeStream(
+      { profileId: 'chat-fast', messages: [{ role: 'user', content: 'oi' }] },
+      'llama3.2:1b',
+      (token) => tokens.push(token),
+    );
+
+    expect(tokens).toEqual(['olá', ' mundo']);
+    expect(response.content).toBe('olá mundo');
+    expect(response.tokensIn).toBe(3);
+    expect(response.tokensOut).toBe(2);
+  });
+
+  it('executeStream() lança erro real se o stream encerrar sem chunk final (done: true)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: ndjsonStreamBody([{ message: { role: 'assistant', content: 'olá' }, done: false }]),
+      }),
+    );
+
+    const adapter = new OllamaAdapter();
+
+    await expect(
+      adapter.executeStream(
+        { profileId: 'chat-fast', messages: [{ role: 'user', content: 'oi' }] },
+        'llama3.2:1b',
+        () => {},
+      ),
+    ).rejects.toThrow('sem enviar o chunk final');
   });
 });

@@ -122,15 +122,35 @@ export class NativeRoutingEngine implements RoutingEngine {
 
   async stream(request: ModelRequest, callbacks: StreamCallbacks): Promise<ModelRunHandle> {
     let cancelled = false;
-    this.execute(request)
-      .then((response) => {
-        if (cancelled) return;
-        callbacks.onDone?.(response);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        callbacks.onError?.(error instanceof Error ? error : new Error(String(error)));
-      });
+
+    const decision = await this.route(request);
+    const adapter = this.deps.adapters.get(decision.providerId);
+    if (!adapter) throw new NoProviderAvailableError(request.profileId);
+    const breaker = this.breakerFor(decision.providerId);
+
+    const run = async () => {
+      try {
+        let response: ModelResponse;
+        if (adapter.executeStream) {
+          response = await adapter.executeStream(request, decision.modelId, (token) => {
+            if (!cancelled) callbacks.onToken?.(token);
+          });
+        } else {
+          // Adapter sem streaming nativo: emite a resposta inteira como um
+          // único token, para não simular incrementalidade que não existe.
+          response = await adapter.execute(request, decision.modelId);
+          if (!cancelled) callbacks.onToken?.(response.content);
+        }
+
+        breaker.recordSuccess();
+        if (!cancelled) callbacks.onDone?.({ ...response, decision });
+      } catch (error) {
+        breaker.recordFailure();
+        if (!cancelled) callbacks.onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    void run();
 
     return {
       cancel: () => {

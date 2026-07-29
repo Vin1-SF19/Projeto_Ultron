@@ -5,7 +5,12 @@ import { NativeRoutingEngine, NoProviderAvailableError } from './native-routing-
 
 function makeAdapter(
   id: string,
-  opts: { models: Model[]; healthy?: boolean; executeImpl?: () => Promise<ModelResponse> },
+  opts: {
+    models: Model[];
+    healthy?: boolean;
+    executeImpl?: () => Promise<ModelResponse>;
+    executeStreamImpl?: (onToken: (token: string) => void) => Promise<ModelResponse>;
+  },
 ): ModelProviderAdapter {
   const descriptor: Provider = { id, name: id, kind: 'local_runtime', enabled: true };
   const health: ProviderHealth = { providerId: id, ok: opts.healthy ?? true, checkedAt: new Date().toISOString() };
@@ -21,6 +26,9 @@ function makeAdapter(
         content: 'ok',
         latencyMs: 1,
       } satisfies ModelResponse),
+    executeStream: opts.executeStreamImpl
+      ? vi.fn((_request, _modelId, onToken: (token: string) => void) => opts.executeStreamImpl!(onToken))
+      : undefined,
   };
 }
 
@@ -126,6 +134,88 @@ describe('NativeRoutingEngine', () => {
 
     expect(response.content).toBe('ok');
     expect(response.decision.providerId).toBe('ollama');
+  });
+
+  it('stream() usa executeStream do adapter e emite tokens incrementalmente', async () => {
+    const ollama = makeAdapter('ollama', {
+      models: [{ id: 'llama3', providerId: 'ollama', displayName: 'Llama 3', capabilities: ['text'] }],
+      executeStreamImpl: async (onToken) => {
+        onToken('olá');
+        onToken(' mundo');
+        return {
+          decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'llama3', reason: '', fallbackUsed: false },
+          content: 'olá mundo',
+          latencyMs: 1,
+        };
+      },
+    });
+
+    const engine = new NativeRoutingEngine({
+      profiles: new Map([
+        ['chat-fast', { id: 'chat-fast', requiredCapabilities: ['text'], preferredProviders: ['ollama'], preferredModels: ['llama3'], fallbacks: [], preferLocal: true }],
+      ]),
+      adapters: new Map([['ollama', ollama]]),
+    });
+
+    const tokens: string[] = [];
+    const done = new Promise<ModelResponse>((resolve) => {
+      void engine.stream(baseRequest, { onToken: (t) => tokens.push(t), onDone: resolve });
+    });
+
+    const response = await done;
+    expect(tokens).toEqual(['olá', ' mundo']);
+    expect(response.content).toBe('olá mundo');
+  });
+
+  it('stream() cai para modo não incremental (token único) quando o adapter não suporta executeStream', async () => {
+    const ollama = makeAdapter('ollama', {
+      models: [{ id: 'llama3', providerId: 'ollama', displayName: 'Llama 3', capabilities: ['text'] }],
+      executeImpl: vi.fn().mockResolvedValue({
+        decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'llama3', reason: '', fallbackUsed: false },
+        content: 'resposta inteira',
+        latencyMs: 1,
+      }),
+    });
+
+    const engine = new NativeRoutingEngine({
+      profiles: new Map([
+        ['chat-fast', { id: 'chat-fast', requiredCapabilities: ['text'], preferredProviders: ['ollama'], preferredModels: ['llama3'], fallbacks: [], preferLocal: true }],
+      ]),
+      adapters: new Map([['ollama', ollama]]),
+    });
+
+    const tokens: string[] = [];
+    const done = new Promise<ModelResponse>((resolve) => {
+      void engine.stream(baseRequest, { onToken: (t) => tokens.push(t), onDone: resolve });
+    });
+
+    const response = await done;
+    expect(tokens).toEqual(['resposta inteira']);
+    expect(response.content).toBe('resposta inteira');
+  });
+
+  it('stream() chama onError e não onDone quando o adapter falha', async () => {
+    const failing = makeAdapter('ollama', {
+      models: [{ id: 'llama3', providerId: 'ollama', displayName: 'Llama 3', capabilities: ['text'] }],
+      executeStreamImpl: async () => {
+        throw new Error('conexão perdida');
+      },
+    });
+
+    const engine = new NativeRoutingEngine({
+      profiles: new Map([
+        ['chat-fast', { id: 'chat-fast', requiredCapabilities: ['text'], preferredProviders: ['ollama'], preferredModels: ['llama3'], fallbacks: [], preferLocal: true }],
+      ]),
+      adapters: new Map([['ollama', failing]]),
+    });
+
+    const onDone = vi.fn();
+    const error = await new Promise<Error>((resolve) => {
+      void engine.stream(baseRequest, { onDone, onError: resolve });
+    });
+
+    expect(error.message).toBe('conexão perdida');
+    expect(onDone).not.toHaveBeenCalled();
   });
 
   it('listProviders/listModels agregam todos os adapters', async () => {

@@ -99,4 +99,37 @@ export class OpenAiCompatibleAdapter implements ModelProviderAdapter {
       estimatedCost,
     };
   }
+
+  async executeStream(
+    request: ModelRequest,
+    modelId: string,
+    onToken: (token: string) => void,
+  ): Promise<ModelResponse> {
+    const startedAt = Date.now();
+    const chatResponse = await this.client.chatStream(
+      modelId,
+      request.messages.map((m) => ({ role: m.role, content: m.content })),
+      onToken,
+    );
+
+    const usage = chatResponse.usage;
+    const price = this.options.pricePerMillionTokens;
+    const estimatedCost =
+      usage && price
+        ? {
+            currency: price.currency,
+            amount:
+              (usage.prompt_tokens / 1_000_000) * price.input + (usage.completion_tokens / 1_000_000) * price.output,
+          }
+        : undefined;
+
+    return {
+      decision: { profileId: request.profileId, providerId: this.options.providerId, modelId, reason: '', fallbackUsed: false },
+      content: chatResponse.choices[0]?.message.content ?? '',
+      tokensIn: usage?.prompt_tokens,
+      tokensOut: usage?.completion_tokens,
+      latencyMs: Date.now() - startedAt,
+      estimatedCost,
+    };
+  }
 }

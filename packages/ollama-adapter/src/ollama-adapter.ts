@@ -85,4 +85,26 @@ export class OllamaAdapter implements ModelProviderAdapter {
       estimatedCost: { currency: 'BRL', amount: 0 },
     };
   }
+
+  async executeStream(
+    request: ModelRequest,
+    modelId: string,
+    onToken: (token: string) => void,
+  ): Promise<ModelResponse> {
+    const startedAt = Date.now();
+    const chatResponse = await this.client.chatStream(
+      modelId,
+      request.messages.map((m) => ({ role: m.role, content: m.content })),
+      onToken,
+    );
+
+    return {
+      decision: { profileId: request.profileId, providerId: 'ollama', modelId, reason: '', fallbackUsed: false },
+      content: chatResponse.message.content,
+      tokensIn: chatResponse.prompt_eval_count,
+      tokensOut: chatResponse.eval_count,
+      latencyMs: Date.now() - startedAt,
+      estimatedCost: { currency: 'BRL', amount: 0 },
+    };
+  }
 }

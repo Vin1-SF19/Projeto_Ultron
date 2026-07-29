@@ -4,7 +4,7 @@ import websocketPlugin from '@fastify/websocket';
 import cors from '@fastify/cors';
 import type { EventBus } from '@ultron/event-bus';
 import type { OpenClawAdapter } from '@ultron/openclaw-adapter';
-import type { RoutingEngine, ModelProviderAdapter } from '@ultron/model-gateway';
+import type { RoutingEngine, ModelProviderAdapter, ModelRunHandle } from '@ultron/model-gateway';
 import { OpenAiCompatibleAdapter } from '@ultron/openai-compatible-adapter';
 import { autonomyLevelSchema, onboardingStepSchema, providerKindSchema, routingProfileIdSchema } from '@ultron/contracts';
 import type { Logger } from './logger.js';
@@ -406,10 +406,14 @@ export async function buildServer(deps: ServerDeps) {
       }
     });
 
+    const activeStreams = new Map<string, ModelRunHandle>();
+
     socket.on('message', (raw: Buffer) => {
-      let message: { kind?: string; cursor?: string } | undefined;
+      let message:
+        | { kind?: string; cursor?: string; requestId?: string; profileId?: string; text?: string }
+        | undefined;
       try {
-        message = JSON.parse(raw.toString()) as { kind?: string; cursor?: string };
+        message = JSON.parse(raw.toString()) as typeof message;
       } catch {
         socket.send(JSON.stringify({ kind: 'error', message: 'mensagem não é JSON válido' }));
         return;
@@ -418,6 +422,69 @@ export async function buildServer(deps: ServerDeps) {
       if (message?.kind === 'replay_since' && typeof message.cursor === 'string') {
         const events = deps.eventStore.listSince(message.cursor);
         socket.send(JSON.stringify({ kind: 'replay', events }));
+        return;
+      }
+
+      if (message?.kind === 'model_stream_start') {
+        const requestId = message.requestId;
+        const profileId = routingProfileIdSchema.safeParse(message.profileId);
+        if (!requestId || !profileId.success || !message.text) {
+          socket.send(
+            JSON.stringify({
+              kind: 'model_stream_error',
+              requestId,
+              message: 'Campos obrigatórios: requestId, profileId (válido), text',
+            }),
+          );
+          return;
+        }
+
+        void deps.routingEngine
+          .stream(
+            { profileId: profileId.data, messages: [{ role: 'user', content: message.text }] },
+            {
+              onToken: (token) => {
+                socket.send(JSON.stringify({ kind: 'model_stream_token', requestId, token }));
+              },
+              onDone: (response) => {
+                activeStreams.delete(requestId);
+                socket.send(JSON.stringify({ kind: 'model_stream_done', requestId, response }));
+                deps.auditLog.record({
+                  correlationId: request.id,
+                  actorType: 'user',
+                  action: 'model.execute',
+                  outcome: 'success',
+                  targetType: 'model',
+                  targetId: response.decision.modelId,
+                  details: { profileId: profileId.data, providerId: response.decision.providerId, streamed: true },
+                });
+              },
+              onError: (error) => {
+                activeStreams.delete(requestId);
+                socket.send(JSON.stringify({ kind: 'model_stream_error', requestId, message: error.message }));
+                deps.auditLog.record({
+                  correlationId: request.id,
+                  actorType: 'user',
+                  action: 'model.execute',
+                  outcome: 'failure',
+                  details: { profileId: profileId.data, error: error.message, streamed: true },
+                });
+              },
+            },
+          )
+          .then((handle) => {
+            activeStreams.set(requestId, handle);
+          })
+          .catch((error: unknown) => {
+            const messageText = error instanceof Error ? error.message : String(error);
+            socket.send(JSON.stringify({ kind: 'model_stream_error', requestId, message: messageText }));
+          });
+        return;
+      }
+
+      if (message?.kind === 'model_stream_cancel' && typeof message.requestId === 'string') {
+        activeStreams.get(message.requestId)?.cancel();
+        activeStreams.delete(message.requestId);
         return;
       }
 

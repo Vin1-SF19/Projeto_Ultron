@@ -10,4 +10,10 @@ export interface ModelProviderAdapter {
   health(): Promise<ProviderHealth>;
   listModels(): Promise<Model[]>;
   execute(request: ModelRequest, modelId: string): Promise<ModelResponse>;
+  /**
+   * Streaming nativo do provider, token a token. Opcional: adapters que não
+   * suportam streaming real ficam de fora e o RoutingEngine cai para o
+   * comportamento não-incremental de execute().
+   */
+  executeStream?(request: ModelRequest, modelId: string, onToken: (token: string) => void): Promise<ModelResponse>;
 }
