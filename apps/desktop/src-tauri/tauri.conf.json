@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4577 ws://127.0.0.1:4577"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4577 ws://127.0.0.1:4577; media-src 'self' blob:"
     }
   },
   "bundle": {

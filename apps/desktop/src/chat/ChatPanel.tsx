@@ -52,7 +52,11 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
           URL.revokeObjectURL(url);
           onFaceEvent?.('voice.response.error');
         });
-        void audio.play();
+        audio.play().catch((error: unknown) => {
+          console.error('Falha ao reproduzir áudio de voz:', error);
+          URL.revokeObjectURL(url);
+          onFaceEvent?.('voice.response.error');
+        });
       })
       .catch((error: unknown) => {
         if (error instanceof VoiceNotConfiguredError) return;
