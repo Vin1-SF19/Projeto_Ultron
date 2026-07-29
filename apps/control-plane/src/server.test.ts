@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
 import { EventBus } from '@ultron/event-bus';
+import { OpenClawAdapter } from '@ultron/openclaw-adapter';
 import { createLogger } from './logger.js';
 import { EventStore } from './event-store.js';
 import { AuditLog } from './audit-log.js';
@@ -21,8 +22,12 @@ describe('control plane server', () => {
     const eventStore = new EventStore(db, eventBus);
     const auditLog = new AuditLog(db);
     const logger = createLogger();
+    const openClawAdapter = new OpenClawAdapter(
+      { enabled: false, url: 'ws://127.0.0.1:18789' },
+      { onDomainEvent: () => {} },
+    );
 
-    return { db, eventBus, eventStore, auditLog, logger };
+    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter };
   }
 
   async function buildTestServer() {
@@ -32,6 +37,7 @@ describe('control plane server', () => {
       eventStore: deps.eventStore,
       eventBus: deps.eventBus,
       auditLog: deps.auditLog,
+      openClawAdapter: deps.openClawAdapter,
       dbFilePath: ':memory:',
       startedAt: new Date(),
     });
@@ -109,6 +115,17 @@ describe('control plane server', () => {
     expect(body.entries).toHaveLength(1);
     expect(body.entries[0].action).toBe('test.action');
     expect(body.entries[0].actorType).toBe('user');
+  });
+
+  it('GET /api/v1/integrations/openclaw/status reporta desabilitado sem fingir conexão', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({ method: 'GET', url: '/api/v1/integrations/openclaw/status' });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.state).toBe('disabled');
+    expect(body.health).toBeNull();
   });
 
   it('rota inexistente devolve envelope de erro padronizado com correlationId', async () => {

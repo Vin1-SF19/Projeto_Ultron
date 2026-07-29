@@ -4,10 +4,12 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
 import { EventBus } from '@ultron/event-bus';
+import { OpenClawAdapter } from '@ultron/openclaw-adapter';
 import { createLogger } from './logger.js';
 import { EventStore } from './event-store.js';
 import { AuditLog } from './audit-log.js';
 import { buildServer } from './server.js';
+import { loadOpenClawConfig } from './integrations-config.js';
 
 const DATA_DIR = path.join(os.homedir(), '.ultron');
 const DB_FILE_PATH = path.join(DATA_DIR, 'ultron.sqlite');
@@ -29,7 +31,37 @@ async function main() {
   const eventStore = new EventStore(db, eventBus);
   const auditLog = new AuditLog(db);
 
-  const app = await buildServer({ logger, eventStore, eventBus, auditLog, dbFilePath: DB_FILE_PATH, startedAt });
+  const openClawConfig = loadOpenClawConfig(process.env);
+  const openClawAdapter = new OpenClawAdapter(openClawConfig, {
+    onDomainEvent: (event) => {
+      // O adapter já traduziu para DomainEvent (camada anticorrupção); aqui só persistimos/publicamos.
+      eventStore.append({
+        type: event.type,
+        aggregateType: event.aggregateType,
+        aggregateId: event.aggregateId,
+        correlationId: event.correlationId,
+        source: event.source,
+        payload: event.payload,
+      });
+    },
+    logInfo: (message, meta) => logger.info(meta, message),
+    logError: (message, meta) => logger.error(meta, message),
+  });
+  if (openClawConfig.enabled) {
+    openClawAdapter.connect();
+  } else {
+    logger.info('OpenClaw desabilitado (defina OPENCLAW_GATEWAY_URL para habilitar)');
+  }
+
+  const app = await buildServer({
+    logger,
+    eventStore,
+    eventBus,
+    auditLog,
+    openClawAdapter,
+    dbFilePath: DB_FILE_PATH,
+    startedAt,
+  });
 
   eventStore.append({
     type: 'system.started',
@@ -62,6 +94,7 @@ async function main() {
       outcome: 'success',
       details: { signal },
     });
+    openClawAdapter.disconnect();
     await app.close();
     db.close();
     process.exit(0);

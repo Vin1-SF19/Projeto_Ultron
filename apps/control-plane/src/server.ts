@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@ultron/event-bus';
+import type { OpenClawAdapter } from '@ultron/openclaw-adapter';
 import type { Logger } from './logger.js';
 import type { EventStore } from './event-store.js';
 import type { AuditLog } from './audit-log.js';
@@ -13,6 +14,7 @@ export interface ServerDeps {
   eventStore: EventStore;
   eventBus: EventBus;
   auditLog: AuditLog;
+  openClawAdapter: OpenClawAdapter;
   dbFilePath: string;
   startedAt: Date;
 }
@@ -95,6 +97,17 @@ export async function buildServer(deps: ServerDeps) {
 
   app.get('/api/v1/audit', async (request) => {
     return { entries: deps.auditLog.listRecent(100), correlationId: request.correlationId };
+  });
+
+  app.get('/api/v1/integrations/openclaw/status', async () => {
+    const state = deps.openClawAdapter.getState();
+    if (state === 'disabled') {
+      // Nunca fingir conexão (seção 9.2 do prompt mestre) — reportar
+      // explicitamente que a integração está desligada, não "conectado".
+      return { state, health: null, note: 'Integração OpenClaw não configurada (defina OPENCLAW_GATEWAY_URL).' };
+    }
+    const health = await deps.openClawAdapter.health();
+    return { state, health };
   });
 
   app.get('/ws', { websocket: true }, (socket, request) => {
