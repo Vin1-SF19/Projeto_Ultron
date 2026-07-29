@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
+import cors from '@fastify/cors';
 import type { EventBus } from '@ultron/event-bus';
 import type { OpenClawAdapter } from '@ultron/openclaw-adapter';
 import type { RoutingEngine, ModelProviderAdapter } from '@ultron/model-gateway';
 import { OpenAiCompatibleAdapter } from '@ultron/openai-compatible-adapter';
-import { providerKindSchema, routingProfileIdSchema } from '@ultron/contracts';
+import { autonomyLevelSchema, onboardingStepSchema, providerKindSchema, routingProfileIdSchema } from '@ultron/contracts';
 import type { Logger } from './logger.js';
 import type { EventStore } from './event-store.js';
 import type { AuditLog } from './audit-log.js';
 import type { ProviderConfigStore } from './provider-config-store.js';
+import type { AutonomyConfigStore } from './autonomy-config-store.js';
+import { InvalidProjectPathError, type ProjectStore } from './project-store.js';
+import type { OnboardingStore } from './onboarding-store.js';
 import { detectEnvironment } from './environment.js';
 import { UltronError, toErrorResponseBody } from './errors.js';
 
@@ -22,6 +26,9 @@ export interface ServerDeps {
   routingEngine: RoutingEngine;
   routingAdapters: Map<string, ModelProviderAdapter>;
   providerConfigStore: ProviderConfigStore;
+  autonomyConfigStore: AutonomyConfigStore;
+  projectStore: ProjectStore;
+  onboardingStore: OnboardingStore;
   dbFilePath: string;
   startedAt: Date;
 }
@@ -34,8 +41,23 @@ declare module 'fastify' {
   }
 }
 
+// Origens do app desktop: WebView2/WKWebView servem o frontend empacotado
+// sob esses esquemas (variam por plataforma e por dev vs. build), nunca
+// como uma origem web pública arbitrária.
+const ALLOWED_ORIGINS = [
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+  'http://localhost:1420',
+];
+
 export async function buildServer(deps: ServerDeps) {
   const app = Fastify({ loggerInstance: deps.logger });
+
+  await app.register(cors, {
+    origin: ALLOWED_ORIGINS,
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  });
 
   await app.register(websocketPlugin);
 
@@ -104,6 +126,119 @@ export async function buildServer(deps: ServerDeps) {
 
   app.get('/api/v1/audit', async (request) => {
     return { entries: deps.auditLog.listRecent(100), correlationId: request.correlationId };
+  });
+
+  app.get('/api/v1/settings/autonomy', async () => {
+    return deps.autonomyConfigStore.get();
+  });
+
+  app.put('/api/v1/settings/autonomy', async (request) => {
+    const body = request.body as { level?: string };
+    const level = autonomyLevelSchema.safeParse(body?.level);
+    if (!level.success) {
+      throw new UltronError('invalid_request', 'Campo obrigatório: level (nível de autonomia válido)', 400);
+    }
+
+    const previous = deps.autonomyConfigStore.get().level;
+    deps.autonomyConfigStore.setLevel(level.data);
+
+    deps.auditLog.record({
+      correlationId: request.correlationId,
+      actorType: 'user',
+      action: 'autonomy.level_changed',
+      outcome: 'success',
+      details: { from: previous, to: level.data },
+    });
+
+    return deps.autonomyConfigStore.get();
+  });
+
+  app.get('/api/v1/onboarding', async () => {
+    return deps.onboardingStore.get();
+  });
+
+  app.post('/api/v1/onboarding/advance', async (request) => {
+    const body = request.body as { completedStep?: string; nextStep?: string };
+    const completedStep = onboardingStepSchema.safeParse(body?.completedStep);
+    const nextStep = onboardingStepSchema.safeParse(body?.nextStep);
+    if (!completedStep.success || !nextStep.success) {
+      throw new UltronError('invalid_request', 'Campos obrigatórios: completedStep, nextStep (válidos)', 400);
+    }
+
+    const progress = deps.onboardingStore.advance(completedStep.data, nextStep.data);
+
+    deps.auditLog.record({
+      correlationId: request.correlationId,
+      actorType: 'user',
+      action: 'onboarding.step_completed',
+      outcome: 'success',
+      details: { completedStep: completedStep.data, nextStep: nextStep.data },
+    });
+
+    return progress;
+  });
+
+  app.post('/api/v1/onboarding/reset', async (request) => {
+    const progress = deps.onboardingStore.reset();
+    deps.auditLog.record({
+      correlationId: request.correlationId,
+      actorType: 'user',
+      action: 'onboarding.reset',
+      outcome: 'success',
+    });
+    return progress;
+  });
+
+  app.get('/api/v1/projects', async () => {
+    return { projects: deps.projectStore.list() };
+  });
+
+  app.post('/api/v1/projects', async (request) => {
+    const body = request.body as { path?: string; name?: string };
+    if (!body?.path) {
+      throw new UltronError('invalid_request', 'Campo obrigatório: path', 400);
+    }
+
+    try {
+      const project = deps.projectStore.add({ path: body.path, name: body.name });
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'project.added',
+        outcome: 'success',
+        targetType: 'project',
+        targetId: project.id,
+        details: { path: project.path },
+      });
+      return { project };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'project.added',
+        outcome: 'failure',
+        details: { path: body.path, error: message },
+      });
+      if (error instanceof InvalidProjectPathError) {
+        throw new UltronError('invalid_project_path', message, 400);
+      }
+      throw new UltronError('project_add_failed', message, 500);
+    }
+  });
+
+  app.delete('/api/v1/projects/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    deps.projectStore.remove(id);
+    deps.auditLog.record({
+      correlationId: request.correlationId,
+      actorType: 'user',
+      action: 'project.removed',
+      outcome: 'success',
+      targetType: 'project',
+      targetId: id,
+    });
+    return { removed: true };
   });
 
   app.get('/api/v1/integrations/openclaw/status', async () => {

@@ -17,6 +17,9 @@ import { buildServer } from './server.js';
 import { loadOpenClawConfig } from './integrations-config.js';
 import { defaultRoutingProfiles } from './routing-config.js';
 import { ProviderConfigStore } from './provider-config-store.js';
+import { AutonomyConfigStore } from './autonomy-config-store.js';
+import { ProjectStore } from './project-store.js';
+import { OnboardingStore } from './onboarding-store.js';
 
 const DATA_DIR = path.join(os.homedir(), '.ultron');
 const DB_FILE_PATH = path.join(DATA_DIR, 'ultron.sqlite');
@@ -62,6 +65,9 @@ async function main() {
 
   const secretStore = new SecretStore();
   const providerConfigStore = new ProviderConfigStore(db, secretStore);
+  const autonomyConfigStore = new AutonomyConfigStore(db);
+  const projectStore = new ProjectStore(db);
+  const onboardingStore = new OnboardingStore(db);
 
   const adapters = new Map<string, ModelProviderAdapter>([['ollama', new OllamaAdapter()]]);
 
@@ -103,6 +109,9 @@ async function main() {
     routingEngine,
     routingAdapters: adapters,
     providerConfigStore,
+    autonomyConfigStore,
+    projectStore,
+    onboardingStore,
     dbFilePath: DB_FILE_PATH,
     startedAt,
   });

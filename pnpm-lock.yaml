@@ -32,6 +32,9 @@ importers:
 
   apps/control-plane:
     dependencies:
+      '@fastify/cors':
+        specifier: ^11.3.0
+        version: 11.3.0
       '@fastify/websocket':
         specifier: ^11.0.2
         version: 11.3.0
@@ -93,6 +96,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.11.1
+      '@tauri-apps/plugin-dialog':
+        specifier: ^2.2.0
+        version: 2.7.2
       react:
         specifier: ^19.0.0
         version: 19.2.8
@@ -857,6 +863,9 @@ packages:
   '@fastify/ajv-compiler@4.0.5':
     resolution: {integrity: sha512-KoWKW+MhvfTRWL4qrhUwAAZoaChluo0m0vbiJlGMt2GXvL4LVPQEjt8kSpHI3IBq5Rez8fg+XeH3cneztq+C7A==}
 
+  '@fastify/cors@11.3.0':
+    resolution: {integrity: sha512-ggQGua+xHv1MvePbPr0v//xLYEsCXbWspquXCJS9Ot5YoRXq8J8ZWzHnxDBVnbtXosvistXo6LtNzOJswf64Fw==}
+
   '@fastify/error@4.2.0':
     resolution: {integrity: sha512-RSo3sVDXfHskiBZKBPRgnQTtIqpi/7zhJOEmAxCiBcM7d0uwdGdxLlsCaLzGs8v8NnxIRlfG0N51p5yFaOentQ==}
 
@@ -1230,6 +1239,9 @@ packages:
     resolution: {integrity: sha512-R8xGtMpwyetawSqm9kYOuMmEqkhUbvcUy8n0aNXIxollKBLESUu5f4Fx+64hgASYm1H+jSWq6jCW6zqTnH6hqQ==}
     engines: {node: '>= 10'}
     hasBin: true
+
+  '@tauri-apps/plugin-dialog@2.7.2':
+    resolution: {integrity: sha512-pX0IGm1I3I6wc+zeKYcq1GSqogK6okCNX5fOdaNU5ab1AjGS6l1E5wFNjEb7meg7ZFSp0JUs+0jQGQNyOvLrsg==}
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -2934,6 +2946,11 @@ snapshots:
       ajv-formats: 3.0.1(ajv@8.20.0)
       fast-uri: 3.1.4
 
+  '@fastify/cors@11.3.0':
+    dependencies:
+      fastify-plugin: 6.0.0
+      toad-cache: 3.7.4
+
   '@fastify/error@4.2.0': {}
 
   '@fastify/fast-json-stringify-compiler@5.1.0':
@@ -3193,6 +3210,10 @@ snapshots:
       '@tauri-apps/cli-win32-arm64-msvc': 2.11.4
       '@tauri-apps/cli-win32-ia32-msvc': 2.11.4
       '@tauri-apps/cli-win32-x64-msvc': 2.11.4
+
+  '@tauri-apps/plugin-dialog@2.7.2':
+    dependencies:
+      '@tauri-apps/api': 2.11.1
 
   '@testing-library/dom@10.4.1':
     dependencies:

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
 import { EventBus } from '@ultron/event-bus';
@@ -9,6 +12,9 @@ import { EventStore } from './event-store.js';
 import { AuditLog } from './audit-log.js';
 import { buildServer } from './server.js';
 import { ProviderConfigStore } from './provider-config-store.js';
+import { AutonomyConfigStore } from './autonomy-config-store.js';
+import { ProjectStore } from './project-store.js';
+import { OnboardingStore } from './onboarding-store.js';
 
 /** SecretStore in-memory — nunca toca o keychain real do SO durante os testes. */
 function makeFakeSecretStore(): SecretStore {
@@ -67,8 +73,11 @@ describe('control plane server', () => {
     const secretStore = makeFakeSecretStore();
     const providerConfigStore = new ProviderConfigStore(db, secretStore);
     const routingAdapters = new Map<string, ModelProviderAdapter>();
+    const autonomyConfigStore = new AutonomyConfigStore(db);
+    const projectStore = new ProjectStore(db);
+    const onboardingStore = new OnboardingStore(db);
 
-    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter, routingEngine, secretStore, providerConfigStore, routingAdapters };
+    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter, routingEngine, secretStore, providerConfigStore, routingAdapters, autonomyConfigStore, projectStore, onboardingStore };
   }
 
   async function buildTestServer(routingEngineOverrides: Partial<RoutingEngine> = {}) {
@@ -83,6 +92,9 @@ describe('control plane server', () => {
       routingEngine,
       routingAdapters: deps.routingAdapters,
       providerConfigStore: deps.providerConfigStore,
+      autonomyConfigStore: deps.autonomyConfigStore,
+      projectStore: deps.projectStore,
+      onboardingStore: deps.onboardingStore,
       dbFilePath: ':memory:',
       startedAt: new Date(),
     });
@@ -279,6 +291,189 @@ describe('control plane server', () => {
 
     expect(response.statusCode).toBe(200);
     expect(secretStore.delete).toHaveBeenCalledWith('ultron:provider:temp');
+  });
+
+  it('GET /api/v1/settings/autonomy retorna observation por padrão (seguro por padrão)', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({ method: 'GET', url: '/api/v1/settings/autonomy' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ level: 'observation', boundedRules: [] });
+  });
+
+  it('PUT /api/v1/settings/autonomy altera o nível e audita a mudança', async () => {
+    const { app, auditLog } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/autonomy',
+      payload: { level: 'assistance' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().level).toBe('assistance');
+
+    const entry = auditLog.listRecent(10).find((e) => e.action === 'autonomy.level_changed');
+    expect(entry?.details).toEqual({ from: 'observation', to: 'assistance' });
+  });
+
+  it('PUT /api/v1/settings/autonomy rejeita nível inválido com erro padronizado', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/settings/autonomy',
+      payload: { level: 'onipotente' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_request');
+  });
+
+  it('POST /api/v1/projects valida caminho real e persiste o projeto', async () => {
+    const { app, auditLog } = await buildTestServer();
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'ultron-project-'));
+
+    try {
+      const response = await app.inject({ method: 'POST', url: '/api/v1/projects', payload: { path: tempDir } });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.project.path).toBe(path.resolve(tempDir));
+      expect(auditLog.listRecent(10).some((e) => e.action === 'project.added' && e.outcome === 'success')).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('POST /api/v1/projects rejeita caminho inexistente com erro padronizado (nunca escaneia disco às cegas)', async () => {
+    const { app, auditLog } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/projects',
+      payload: { path: 'C:\\este\\caminho\\nao\\existe\\de\\jeito\\nenhum' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_project_path');
+    expect(auditLog.listRecent(10).some((e) => e.action === 'project.added' && e.outcome === 'failure')).toBe(true);
+  });
+
+  it('POST /api/v1/projects rejeita o mesmo caminho duas vezes', async () => {
+    const { app } = await buildTestServer();
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'ultron-project-'));
+
+    try {
+      await app.inject({ method: 'POST', url: '/api/v1/projects', payload: { path: tempDir } });
+      const second = await app.inject({ method: 'POST', url: '/api/v1/projects', payload: { path: tempDir } });
+
+      expect(second.statusCode).toBe(400);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('GET /api/v1/projects lista projetos adicionados', async () => {
+    const { app } = await buildTestServer();
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'ultron-project-'));
+
+    try {
+      await app.inject({ method: 'POST', url: '/api/v1/projects', payload: { path: tempDir } });
+      const response = await app.inject({ method: 'GET', url: '/api/v1/projects' });
+
+      expect(response.json().projects).toHaveLength(1);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('GET /api/v1/onboarding retorna welcome por padrão (retomável desde o início)', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({ method: 'GET', url: '/api/v1/onboarding' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ currentStep: 'welcome', completedSteps: [] });
+  });
+
+  it('POST /api/v1/onboarding/advance avança o passo e é retomável em reinícios (mesmo banco)', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/onboarding/advance',
+      payload: { completedStep: 'welcome', nextStep: 'diagnostics' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ currentStep: 'diagnostics', completedSteps: ['welcome'] });
+
+    const getResponse = await app.inject({ method: 'GET', url: '/api/v1/onboarding' });
+    expect(getResponse.json().currentStep).toBe('diagnostics');
+  });
+
+  it('POST /api/v1/onboarding/advance rejeita step inválido com erro padronizado', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/onboarding/advance',
+      payload: { completedStep: 'welcome', nextStep: 'passo-que-nao-existe' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_request');
+  });
+
+  it('POST /api/v1/onboarding/reset volta ao início', async () => {
+    const { app } = await buildTestServer();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/onboarding/advance',
+      payload: { completedStep: 'welcome', nextStep: 'diagnostics' },
+    });
+    const response = await app.inject({ method: 'POST', url: '/api/v1/onboarding/reset' });
+
+    expect(response.json()).toEqual({ currentStep: 'welcome', completedSteps: [] });
+  });
+
+  it('permite CORS para a origem do app desktop empacotado (http://tauri.localhost)', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'http://tauri.localhost' },
+    });
+
+    expect(response.headers['access-control-allow-origin']).toBe('http://tauri.localhost');
+  });
+
+  it('preflight OPTIONS permite DELETE e PUT (não só GET/POST) para a origem do app', async () => {
+    const { app } = await buildTestServer();
+
+    const deleteResponse = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/v1/projects/abc',
+      headers: {
+        origin: 'http://tauri.localhost',
+        'access-control-request-method': 'DELETE',
+      },
+    });
+    expect(deleteResponse.headers['access-control-allow-methods']).toContain('DELETE');
+
+    const putResponse = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/v1/settings/autonomy',
+      headers: {
+        origin: 'http://tauri.localhost',
+        'access-control-request-method': 'PUT',
+      },
+    });
+    expect(putResponse.headers['access-control-allow-methods']).toContain('PUT');
   });
 
   it('rota inexistente devolve envelope de erro padronizado com correlationId', async () => {

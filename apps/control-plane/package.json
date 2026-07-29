@@ -22,6 +22,7 @@
     "@ultron/security": "workspace:*",
     "fastify": "^5.2.0",
     "@fastify/websocket": "^11.0.2",
+    "@fastify/cors": "^11.3.0",
     "pino": "^9.6.0",
     "zod": "^3.24.0"
   },
