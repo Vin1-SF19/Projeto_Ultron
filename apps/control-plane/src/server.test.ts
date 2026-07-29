@@ -555,6 +555,79 @@ describe('control plane server', () => {
       expect(response.statusCode).toBe(400);
       expect(response.json().error.code).toBe('voice_not_configured');
     });
+
+    it('POST /api/v1/voice/speak registra caracteres e bytes de áudio reais no AuditLog (métricas de uso, seção Fase 7)', async () => {
+      const fakeAudioBytes = new Uint8Array([1, 2, 3, 4, 5]);
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/v1/voices')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ voices: [] }) });
+        }
+        if (url.includes('/v1/text-to-speech')) {
+          return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(fakeAudioBytes.buffer) });
+        }
+        return Promise.reject(new Error(`URL inesperada: ${url}`));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { app, auditLog } = await buildTestServer();
+
+      await app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings/voice',
+        payload: { apiKey: 'chave-valida', voiceId: 'abc123', voiceName: 'George' },
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/voice/speak',
+        payload: { text: 'Ola mundo' },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const entries = auditLog.listRecent(10);
+      const speakEntry = entries.find((e) => e.action === 'voice.spoken');
+      expect(speakEntry).toBeDefined();
+      expect(speakEntry?.outcome).toBe('success');
+      expect(speakEntry?.details).toMatchObject({ characters: 'Ola mundo'.length, audioBytes: fakeAudioBytes.length });
+    });
+
+    it('POST /api/v1/voice/transcribe registra bytes de áudio e idioma detectado no AuditLog', async () => {
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/v1/voices')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ voices: [] }) });
+        }
+        if (url.includes('/v1/speech-to-text')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ text: 'ola', language_code: 'por' }) });
+        }
+        return Promise.reject(new Error(`URL inesperada: ${url}`));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { app, auditLog } = await buildTestServer();
+
+      await app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings/voice',
+        payload: { apiKey: 'chave-valida', voiceId: 'abc123', voiceName: 'George' },
+      });
+
+      const form = new FormData();
+      form.append('audio', new Blob([new Uint8Array([1, 2, 3])]), 'gravacao.webm');
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/voice/transcribe',
+        payload: form,
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const entries = auditLog.listRecent(10);
+      const transcribeEntry = entries.find((e) => e.action === 'voice.transcribed');
+      expect(transcribeEntry).toBeDefined();
+      expect(transcribeEntry?.outcome).toBe('success');
+      expect(transcribeEntry?.details).toMatchObject({ languageCode: 'por', audioBytes: 3 });
+    });
   });
 
   describe('/ws streaming de modelo (model_stream_*)', () => {

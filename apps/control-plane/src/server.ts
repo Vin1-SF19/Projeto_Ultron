@@ -450,10 +450,26 @@ export async function buildServer(deps: ServerDeps) {
     try {
       const client = new ElevenLabsClient(apiKey);
       const audio = await client.textToSpeech({ voiceId: voiceConfig.voiceId, text: body.text });
+
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'voice.spoken',
+        outcome: 'success',
+        details: { characters: body.text.length, audioBytes: audio.length, voiceId: voiceConfig.voiceId },
+      });
+
       reply.header('content-type', 'audio/mpeg');
       return reply.send(Buffer.from(audio));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'voice.spoken',
+        outcome: 'failure',
+        details: { characters: body.text.length, error: message },
+      });
       throw new UltronError('voice_synthesis_failed', message, 502);
     }
   });
@@ -483,12 +499,19 @@ export async function buildServer(deps: ServerDeps) {
         actorType: 'user',
         action: 'voice.transcribed',
         outcome: 'success',
-        details: { languageCode: result.languageCode },
+        details: { languageCode: result.languageCode, audioBytes: buffer.length },
       });
 
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'voice.transcribed',
+        outcome: 'failure',
+        details: { error: message },
+      });
       throw new UltronError('voice_transcription_failed', message, 502);
     }
   });
