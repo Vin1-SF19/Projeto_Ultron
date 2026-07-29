@@ -2,7 +2,7 @@
 
 > Arquivo de continuidade. Se o contexto da conversa for perdido/resetado, leia este arquivo primeiro para saber exatamente onde o trabalho parou e o que fazer a seguir.
 
-Última atualização: 2026-07-29
+Última atualização: 2026-07-29 (sessão da tarde)
 
 ---
 
@@ -12,99 +12,102 @@ Superassistente pessoal/profissional local-first ("Projeto Ultron"), especificad
 
 Resumo rápido: monólito modular local (Tauri 2 + React no desktop, Control Plane em Node + Fastify + WebSocket + SQLite), com adapters para OpenClaw, Ollama, Claude Code, Codex, routers de modelo, ElevenLabs, Gmail, Calendar, WhatsApp, GitHub. 20 fases de implementação.
 
-Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branch `master` = trabalho já revisado/estável; branch `develop` criada para integração; branches `phase/NN-nome` por fase, conforme seção 55 do prompt mestre).
+Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branches `master`/`develop` sincronizadas; `phase/NN-nome` por fase).
+
+**Nota de autonomia (2026-07-29, tarde):** o usuário autorizou trabalho autônomo até as 13h sem pausar para perguntas não-bloqueantes — só interromper para decisões genuinamente bloqueantes (perda de dados, credencial, pagamento, instalação privilegiada, infraestrutura existente, acesso externo, identidade visual, irreversibilidade). Verificar se essa janela de autonomia ainda está em vigor antes de assumir que continua valendo em sessões futuras.
 
 ---
 
 ## 2. ONDE PARAMOS (ESTADO ATUAL)
 
 **FASE 0 (Auditoria) — CONCLUÍDA.**
-**FASE 1 (Fundação do monorepo) — CONCLUÍDA.** Commitada e enviada ao GitHub (`master`, commit `916f904`).
-**FASE 2 (Control Plane e Event Bus) — CONCLUÍDA.** Ainda não commitada (ver seção 8 — próximo passo).
+**FASE 1 (Fundação do monorepo) — CONCLUÍDA.**
+**FASE 2 (Control Plane e Event Bus) — CONCLUÍDA.**
+**FASE 3 (OpenClaw Adapter) — CONCLUÍDA e VALIDADA CONTRA GATEWAY REAL.**
 
-Branch de trabalho atual: `phase/02-control-plane` (criada a partir de `develop`, que foi criada a partir de `master`).
+Próxima fase: **FASE 4 — Providers, modelos e router** (Provider SDK, Ollama, OpenAI, Claude, Codex, health, perfis, fallback, circuit breaker, custos, UI de modelos).
 
-Próxima fase a iniciar: **FASE 3 — OpenClaw Adapter** (descoberta do Gateway local, WebSocket/RPC, autenticação, health, reconexão, mapeamento de eventos, camada anticorrupção — ver ADR-003 e seção 51 do prompt mestre).
+### O que existe hoje no ambiente (importante para continuar)
 
-### Checklist Fase 2 (concluída nesta sessão)
-- [x] `packages/event-bus` criado — EventBus in-process pub/sub, com suporte a filtro por tipo exato ou prefixo wildcard (`system.*`), e handler de erro por assinante que **nunca deixa um listener quebrado derrubar os demais nem quem publicou** (testado).
-- [x] `EventStore` do control-plane refatorado para depender do `EventBus` (recebe por injeção), preservando a garantia "grava antes de publicar" (um assinante nunca vê um evento que não sobreviveria a um reinício).
-- [x] `EventStore.listSince(cursor)` — replay incremental por cursor (usa `rowid` como critério de ordenação monotônica), testado.
-- [x] `AuditLog` (`apps/control-plane/src/audit-log.ts`) — tabela `audit_events` (migration `002_audit_events`), distinta da tabela `events` de domínio. Campos: `actor_type` (user/agent/system), `actor_id`, `action`, `outcome` (success/failure), `target_type`/`target_id`, `details`. Endpoint `GET /api/v1/audit`.
-- [x] Erros padronizados: `UltronError` (código + statusCode + details) e envelope JSON consistente `{ error: { code, message, correlationId, details } }` para todo erro HTTP, incluindo 404 (`setNotFoundHandler`) e 500 não tratado — nunca mensagem genérica "Algo deu errado".
-- [x] Correlation ID de ponta a ponta: hook `onRequest` gera ou reaproveita `x-correlation-id` (header), devolvido em toda resposta; usado nos logs estruturados e nas entradas de auditoria.
-- [x] WebSocket (`/ws`) agora aceita mensagem `{ kind: "replay_since", cursor }` do cliente para replay incremental, além do replay dos últimos 50 eventos na conexão inicial. Erros de envio ao socket são capturados e logados, não derrubam a conexão.
-- [x] Testes de reinício: `event-store.test.ts` reabre o **mesmo arquivo SQLite** (não `:memory:`) em um diretório temporário, simulando fechar e reabrir o processo, confirmando que eventos persistem.
-- [x] Teste de falha: listener do EventBus que lança erro proposital — confirmado que não impede gravação nem os demais assinantes.
-- [x] Validado de ponta a ponta com o binário compilado real (`node dist/main.js`): correlation ID customizado no header, 404 com envelope padronizado, `/api/v1/audit` retornando o evento real `control_plane.started`.
-- [x] `pnpm install`, `pnpm build`, `pnpm test` (25 testes, 5 pacotes), `pnpm lint`, `pnpm typecheck` — todos 100% verdes do zero.
+- **OpenClaw CLI instalado globalmente** via npm (`openclaw@2026.7.1-2`). Config em `~/.openclaw/openclaw.json` (auth mode `token`, token gerado — **considerar comprometido**, foi exibido em terminal durante debug; recomendar regenerar antes de uso real).
+- **Gateway OpenClaw pode estar rodando em background** (processo `openclaw gateway run`, escutando em `ws://127.0.0.1:18789`, loopback-only). Verificar com `openclaw gateway status` antes de assumir que está no ar — pode ter sido encerrado entre sessões.
+- **Rust, Cargo, Visual Studio Build Tools** instalados (Fase 1, ADR-006).
+- **node:sqlite** nativo em uso, não `better-sqlite3` (ADR-005).
 
-## 3. AMBIENTE LOCAL
+### Checklist Fase 3 (concluída nesta sessão)
+- [x] Pesquisa técnica do protocolo OpenClaw Gateway (WebSocket, porta 18789, handshake por challenge, protocolo wire v4).
+- [x] **Descoberta crítica via `npm view` direto (não só documentação):** a tag `latest` de `@openclaw/gateway-client`/`@openclaw/gateway-protocol` é um placeholder vazio (`0.0.0`, "Reserved package name"); o SDK real e funcional só existe na tag `beta` (`2026.7.2-beta.5`). Ver [ADR-007](docs/adr/ADR-007-openclaw-sdk.md).
+- [x] `packages/openclaw-adapter` criado, usando o SDK oficial (`GatewayClient`) pinado na versão exata `2026.7.2-beta.5`.
+- [x] `OpenClawAdapter`: nunca conecta sem `enabled: true` explícito (integração opcional por padrão); usa protocolo v4; nunca loga o token (testado explicitamente); estados `disabled/connecting/connected/reconnecting/disconnected/error`; `health()` via `client.request('status', {})`; `disconnect()` limpo.
+- [x] Camada anticorrupção (`event-mapper.ts`): todo evento do Gateway vira `DomainEvent` do tipo `integration.openclaw.<evento>`, `aggregateType: 'integration'`, `source.integrationId: 'openclaw'` — nenhuma camada acima conhece o formato bruto do OpenClaw.
+- [x] Integrado ao Control Plane: endpoint `GET /api/v1/integrations/openclaw/status` (reporta `disabled` honestamente quando não configurado — nunca finge conexão); eventos do adapter fluem para o `EventStore` como qualquer outro evento de domínio; `disconnect()` chamado no shutdown gracioso.
+- [x] Configuração via env vars: `OPENCLAW_GATEWAY_URL` (presença = habilita), `OPENCLAW_GATEWAY_TOKEN`.
+- [x] **Instalado o OpenClaw de verdade** (aprovado pelo usuário) e **validado o adapter contra um Gateway real rodando**: conectou, recebeu e traduziu eventos reais (`integration.openclaw.health`, `integration.openclaw.tick`) com métricas reais de event loop, persistiu no Event Store, endpoint de status reportou erro real e específico (`missing scope: operator.read`) em vez de sucesso fingido.
+- [x] [ADR-008](docs/adr/ADR-008-openclaw-onboarding-flow.md) documenta o fluxo real de onboarding observado empiricamente (não estava na doc pública): comandos não-interativos, comportamento de lock de migração, escopos padrão restritos, etc.
+- [x] 11 testes novos no `openclaw-adapter` (mock do SDK) + 1 teste novo no `control-plane` (endpoint de status) — total 37 testes em 6 pacotes, todos passando. Lint/typecheck/build limpos.
 
-Sem mudanças desde o fim da Fase 1. Rust/Cargo e Visual Studio Build Tools já instalados (ver ADR-006). `node:sqlite` nativo em uso (ADR-005).
+## 3. DECISÕES TOMADAS (ADRs)
 
-## 4. DECISÕES TOMADAS (ADRs)
+ADR-001 a ADR-008 — ver [docs/adr/](docs/adr/). Destaques da Fase 3:
+- **ADR-007**: usar SDK oficial do OpenClaw (não reimplementar protocolo), pinado na tag `beta` exata (não `latest`, que está vazio).
+- **ADR-008**: comportamento real de onboarding/autenticação do OpenClaw, observado empiricamente (não documentado publicamente).
 
-ADR-001 a ADR-006 — ver [docs/adr/](docs/adr/). Nenhum ADR novo foi necessário na Fase 2 (implementação dentro do que já estava decidido; nenhuma escolha arquitetural nova relevante o suficiente para justificar um ADR).
-
-## 5. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
+## 4. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
 
 ```text
 packages/
-  contracts/        DomainEvent (Zod + TS)
-  database/         node:sqlite, migrator, migrations 001 (events) e 002 (audit_events)
-  event-bus/        EventBus in-process pub/sub — NOVO na Fase 2
+  contracts/          DomainEvent (Zod + TS)
+  database/           node:sqlite, migrator, migrations 001 (events) e 002 (audit_events)
+  event-bus/           EventBus in-process pub/sub
+  openclaw-adapter/    NOVO na Fase 3 — OpenClawAdapter + camada anticorrupção
+    src/types.ts             config e tipos do adapter
+    src/event-mapper.ts      tradução OpenClaw -> DomainEvent
+    src/openclaw-adapter.ts  classe principal (usa @openclaw/gateway-client)
 
 apps/control-plane/src/
-  main.ts           bootstrap: abre DB, roda migrations, cria EventBus/EventStore/AuditLog, sobe Fastify
-  server.ts         Fastify + WebSocket + correlation ID hook + error handler padronizado — atualizado na Fase 2
-  event-store.ts    grava evento no SQLite, publica no EventBus, listRecent/listSince — atualizado na Fase 2
-  audit-log.ts      AuditLog — NOVO na Fase 2
-  errors.ts         UltronError + envelope de erro — NOVO na Fase 2
-  logger.ts         Pino com redaction de segredos
-  environment.ts    detecção real de hardware/runtime
+  main.ts                 bootstrap: instancia OpenClawAdapter, conecta se habilitado, disconnect() no shutdown
+  server.ts                + endpoint GET /api/v1/integrations/openclaw/status
+  integrations-config.ts  NOVO — loadOpenClawConfig(env) a partir de OPENCLAW_GATEWAY_URL/TOKEN
+  event-store.ts, audit-log.ts, errors.ts, logger.ts, environment.ts  (inalterados desde Fase 2)
 
-apps/desktop/src/
-  App.tsx                    tela de diagnóstico, consome Control Plane real via fetch
-  control-plane-client.ts    cliente HTTP tipado para os endpoints do Control Plane
+apps/desktop/src/          (inalterado desde Fase 1 — tela de status ainda não mostra integrações)
 ```
 
-## 6. OBSTÁCULOS REAIS ENCONTRADOS NA FASE 1 (para não repetir a investigação)
+## 5. OBSTÁCULOS REAIS ENCONTRADOS (histórico completo, para não repetir investigação)
 
-- `better-sqlite3` não compilava (sem prebuilt, sem VS Build Tools) → trocado por `node:sqlite` nativo (ADR-005).
-- Vite 5.4.21 não reconhece `node:sqlite` como builtin → resolvido com `createRequire` em vez de `import`/`export ... from 'node:sqlite'`.
-- Rust não linkava (faltava MSVC) → resolvido instalando Visual Studio Build Tools (ADR-006, aprovado pelo usuário).
-- `pino-pretty` ausente quebrava testes → adicionado como devDependency explícita.
-- `eslint.config.js` sem `@eslint/js`/`typescript-eslint` declarados → corrigido.
-- `tauri.conf.json` com `pnpm --dir ..` quebrava em workspace → trocado para `pnpm --filter @ultron/desktop`.
-- `packages/contracts`/`database` sem script `build` → quebraria em produção real → corrigido.
+**Fase 1:** `better-sqlite3` não compilava → `node:sqlite` (ADR-005). Vite não reconhece `node:sqlite` → `createRequire`. Rust não linkava → instalado VS Build Tools (ADR-006). `pino-pretty` ausente, `eslint.config.js` sem deps, `tauri.conf.json` com `pnpm --dir` errado, pacotes sem script `build` — todos corrigidos.
 
-## 7. INCIDENTE OPERACIONAL REGISTRADO (Fase 1)
+**Fase 3:**
+- SDK oficial do OpenClaw parecia não existir de verdade (`npm view` mostrava `0.0.0`) — investigação mais funda (`npm view @pacote@beta`, `npm pack` + leitura do README real dentro do tarball) revelou que o código real está na tag `beta`.
+- `clientName: 'ultron-control-plane'` não tipava — `GatewayClientOptions.clientName` exige um `GatewayClientId` do enum `GATEWAY_CLIENT_IDS`; usado `NODE_HOST` ("node-host").
+- `openclaw gateway run` matado abruptamente (timeout) deixou lock de "startup migrations already running" — resolvido aguardando o timeout indicado na própria mensagem de erro (não havia comando de limpeza manual encontrado).
+- Token do OpenClaw acidentalmente exibido em output de terminal durante debug — tratado como comprometido, usuário deve regenerar antes de uso real.
 
-Uso de `taskkill //F //IM node.exe` matou 8 processos node.exe de uma vez (não só o de teste). **Lição aplicada desde então: sempre encerrar processos de teste por PID específico** (`taskkill //PID <pid> //F`), confirmado funcionando assim na validação da Fase 2.
+## 6. INCIDENTES OPERACIONAIS REGISTRADOS
 
-## 8. PRÓXIMOS PASSOS IMEDIATOS (ordem)
+1. **Fase 1:** `taskkill //F //IM node.exe` matou 8 processos node de uma vez. Lição aplicada: sempre `taskkill //PID <pid> //F`.
+2. **Fase 3:** comando `cat ~/.openclaw/openclaw.json` expôs o token de autenticação real no output do terminal (visível no histórico da conversa). Token é local/loopback-only, mas deve ser tratado como comprometido. **Lição: ao inspecionar arquivos de config que podem conter segredos, sempre filtrar/redactar antes de exibir, nunca fazer `cat` bruto.**
 
-1. **Commitar a Fase 2** na branch `phase/02-control-plane` (commits pequenos por escopo, conforme seção 55 do prompt mestre: ex. `feat(event-bus): add in-process pub/sub`, `feat(control-plane): add audit log and standardized errors`, `feat(control-plane): add correlation id propagation`, `test(control-plane): cover restart and failure scenarios`). Depois merge em `develop` e push.
-2. Perguntar ao usuário se deseja abrir PR de `phase/02-control-plane` → `develop`, ou seguir direto.
-3. Iniciar **Fase 3 — OpenClaw Adapter**: descoberta do Gateway local, autenticação, WebSocket, RPC, health, reconexão, mapeamento de eventos, tela de status, suporte a local/WSL/remoto. Antes de codificar, reconfirmar no [UPSTREAM_AUDIT.md](docs/research/UPSTREAM_AUDIT.md) e [ADR-003](docs/adr/ADR-003-openclaw-integration.md) a estratégia já decidida.
-4. Seguir estritamente a ordem das 20 fases — não pular etapas.
+## 7. PRÓXIMOS PASSOS IMEDIATOS (ordem)
 
-## 9. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
+1. **Commitar a Fase 3** em commits pequenos (ex: `feat(openclaw-adapter): add adapter using official SDK`, `feat(control-plane): integrate OpenClawAdapter with status endpoint`, `docs(adr): document OpenClaw SDK and onboarding findings`). Merge `phase/03-openclaw-adapter` → `develop` → `master`, push.
+2. Iniciar **Fase 4 — Providers, modelos e router**: criar a interface `RoutingEngine` (seção 6 do prompt mestre), `NativeRoutingEngine`, e o primeiro provider real (candidato natural: Ollama, já que não depende de credenciais pagas — verificar se está instalado localmente antes, senão será necessário pedir aprovação para instalar, como fizemos com Rust/VS Build Tools/OpenClaw).
+3. Antes de conectar qualquer provider pago (OpenAI, Anthropic API direta, etc.), **isso exigirá credencial do usuário — sempre uma pausa bloqueante**, mesmo dentro de uma janela de autonomia ampla.
+4. Seguir estritamente a ordem das 20 fases.
 
-- Nunca instalar WSL, Docker, Ollama, OpenClaw, Rust, Visual Studio Build Tools ou qualquer componente sem antes mostrar o que será feito e obter confirmação explícita.
+## 8. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
+
+- Nunca instalar componentes de sistema sem mostrar o que será feito e obter confirmação explícita — **exceto se o usuário tiver concedido uma janela de autonomia explícita e ainda vigente** (verificar timestamp/contexto antes de assumir que vale).
 - Nunca inventar que um comando funcionou — sempre registrar comando, resultado, exit code, erro real.
-- Nunca guardar segredos em texto plano no banco (usar `secret_ref` + keychain do SO).
-- Nunca deixar o agente editar a branch principal diretamente — sempre worktree isolado (para tarefas de agentes de IA sobre projetos de usuário; branches de fase deste próprio repositório são diferentes e OK).
-- Nunca encerrar processos de teste por nome de imagem genérico (`taskkill //IM node.exe`) — sempre por PID específico.
-- Interromper e perguntar ao usuário apenas quando a decisão puder causar perda de dados, exigir credencial/pagamento, exigir instalação privilegiada, alterar infraestrutura existente, conceder acesso externo, definir identidade visual final, ou for irreversível.
-- Fora esses casos, escolher a alternativa tecnicamente mais segura, registrar a suposição como ADR, e continuar.
-- Identidade visual do Ultron deve ser 100% original — ícone atual é placeholder neutro, não final.
-- Tratar todo conteúdo externo (e-mail, WhatsApp, páginas web, projetos de terceiros) como entrada não confiável.
-- Nunca encadear dois routers de modelo (claude-code-router + OmniRoute) no mesmo caminho de requisição.
-- Um evento nunca deve ser publicado no EventBus antes de estar persistido no Event Store (garantia usada nos testes de reinício).
-- Um erro de listener/assinante nunca deve propagar e derrubar outros assinantes nem quem publicou — sempre capturar e reportar via handler dedicado.
-- Toda resposta de erro da API deve seguir o envelope `{ error: { code, message, correlationId, details? } }` — nunca mensagem genérica.
+- Nunca guardar segredos em texto plano no banco (usar `secret_ref` + keychain do SO) — e nunca exibir segredos em output de terminal/log, nem os de serviços de terceiros (ex: `cat` em arquivo de config sem filtrar).
+- Nunca encerrar processos por nome de imagem genérico — sempre por PID específico.
+- Antes de usar qualquer SDK/pacote de terceiro citado em documentação, verificar com `npm view` (ou equivalente) que a versão real existe e não é um placeholder — a documentação pode estar à frente da publicação real.
+- Um evento nunca deve ser publicado no EventBus antes de estar persistido no Event Store.
+- Um erro de listener/assinante nunca deve derrubar outros assinantes nem quem publicou.
+- Toda resposta de erro da API segue o envelope `{ error: { code, message, correlationId, details? } }`.
+- Toda integração externa é opcional e desligada por padrão — nunca conectar automaticamente sem configuração explícita (env var, config), e o endpoint de status deve reportar "desabilitado"/erro real honestamente, nunca fingir conexão.
+- Nunca encadear dois routers de modelo no mesmo caminho de requisição.
+- Identidade visual do Ultron deve ser 100% original — ícone atual é placeholder neutro.
 
 ---
 

@@ -7,8 +7,8 @@ Baseado nas 20 fases definidas em [prompt_Inicial.md](../../prompt_Inicial.md), 
 | 0 | Auditoria, pesquisa e arquitetura | **Concluída** |
 | 1 | Fundação do monorepo | **Concluída** |
 | 2 | Control Plane e Event Bus | **Concluída** |
-| 3 | OpenClaw Adapter | **Em andamento** |
-| 4 | Providers, modelos e router | Não iniciada |
+| 3 | OpenClaw Adapter | **Concluída** |
+| 4 | Providers, modelos e router | **Em andamento** |
 | 5 | Onboarding e segredos | Não iniciada |
 | 6 | Home, chat e rosto | Não iniciada |
 | 7 | Voz | Não iniciada |
@@ -35,3 +35,5 @@ Ver [STATUS.md](../../STATUS.md) na raiz do projeto para o estado detalhado e os
 3. Skills de terceiros no ecossistema OpenClaw têm histórico documentado de exfiltração de dados — a integração via `OpenClawAdapter` nunca deve conceder acesso a segredos sem passar pelo Approval Engine.
 4. Routers externos (claude-code-router, OmniRoute) têm bugs conhecidos de contagem de tokens em streaming — não confiar neles como fonte única de verdade para custo; validar com métricas internas.
 5. Projetos de referência com ritmo de release muito alto (OmniRoute, aiox-core) já tiveram releases quebradas — nunca seguir `latest` automaticamente nos adapters correspondentes.
+6. SDK oficial do OpenClaw (`@openclaw/gateway-client`/`gateway-protocol`) só existe funcional na tag `beta` — a tag `latest` do npm é um placeholder vazio. Nunca atualizar automaticamente sem `npm view` confirmando que a nova versão tem código real (ver ADR-007).
+7. Escopos de operador do OpenClaw por padrão não incluem `operator.read` — qualquer onboarding do Ultron que gere token do OpenClaw precisa configurar escopos explicitamente, nunca aceitar o default silenciosamente (ver ADR-008).
