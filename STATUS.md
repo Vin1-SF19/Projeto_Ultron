@@ -2,7 +2,7 @@
 
 > Arquivo de continuidade. Se o contexto da conversa for perdido/resetado, leia este arquivo primeiro para saber exatamente onde o trabalho parou e o que fazer a seguir.
 
-Última atualização: 2026-07-29 (fim do dia)
+Última atualização: 2026-07-29 (fim do dia — Fase 6 concluída)
 
 ---
 
@@ -18,9 +18,9 @@ Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branches `
 
 ## 2. ONDE PARAMOS (ESTADO ATUAL)
 
-**FASES 0-5 CONCLUÍDAS.** Todas validadas com testes automatizados E com o app real rodando (Control Plane + Tauri compilado), não apenas com testes unitários.
+**FASES 0-6 CONCLUÍDAS.** Todas validadas com testes automatizados E com o app real rodando (Control Plane + dev server/Tauri), não apenas com testes unitários.
 
-Próxima fase: **FASE 6 — Home, Chat e Rosto** (a primeira entrega verdadeiramente visual/interativa: chat funcional com streaming, avatar com estados reativos a eventos, layout de Home com navegação).
+Próxima fase: **FASE 7** (ver [prompt_Inicial.md](prompt_Inicial.md) para o escopo exato — ainda não investigado em detalhe nesta sessão).
 
 ### Resumo por fase
 - **Fase 0**: auditoria de 6 projetos de referência, arquitetura, threat model, ADRs 001-004.
@@ -29,6 +29,18 @@ Próxima fase: **FASE 6 — Home, Chat e Rosto** (a primeira entrega verdadeiram
 - **Fase 3**: OpenClaw Adapter, testado contra Gateway real instalado nesta sessão.
 - **Fase 4**: RoutingEngine com fallback/circuit breaker, Ollama local testado com inferência real.
 - **Fase 5**: keychain (`SecretStore`), configuração de providers em runtime (incl. Ollama remoto do usuário), sistema de autonomia/permissões, seleção de pasta de projeto, onboarding com UI retomável — **tudo validado rodando o app real**.
+- **Fase 6**: streaming real de tokens (Ollama NDJSON + OpenAI-compatible SSE) via WebSocket, rosto SVG original com 14 estados reagindo a eventos reais, layout de Home em 3 colunas, chat funcional com Markdown/histórico/streaming, estado offline/reconexão — **validado com o dev server real + Ollama local rodando de verdade (não só mocks)**.
+
+### Checklist Fase 6 (completa)
+- [x] `packages/ollama-adapter` e `packages/openai-compatible-adapter`: `executeStream()` consumindo o protocolo nativo de streaming de cada provider (NDJSON e SSE respectivamente), em vez de simular incrementalidade.
+- [x] `NativeRoutingEngine.stream()`: usa `executeStream` do adapter quando disponível; cai para token único (resposta inteira) quando o adapter não suporta — nunca finge granularidade que não existe.
+- [x] Control Plane `/ws`: protocolo `model_stream_start`/`model_stream_token`/`model_stream_done`/`model_stream_error`/`model_stream_cancel`, reaproveitando o WebSocket já existente (sem SSE dedicado).
+- [x] `apps/desktop/src/face/`: `Face.tsx` (SVG original, 14 estados obrigatórios da seção 24), `face-state.ts`, `event-to-face-state.ts` (mapeamento de eventos reais → estado, nunca decorativo). Respiração sutil, piscadas, `prefers-reduced-motion`, modo sem animação, opção de ocultar rosto.
+- [x] `apps/desktop/src/chat/`: `ChatSocket` (cliente do protocolo `model_stream_*`), `ChatPanel.tsx` (Markdown via `react-markdown`, histórico em memória, indicador de provider/modelo, banner de desconexão).
+- [x] `apps/desktop/src/home/Home.tsx`: layout de 3 colunas (navegação lateral estática + rosto/chat central + "seu dia" à direita como placeholder honesto, nunca com dados de exemplo). `ProjectsPanel` (Fase 5) reaproveitado dentro da coluna direita até existir roteamento real de navegação.
+- [x] `App.tsx`: decide entre diagnóstico (desconectado) / Onboarding (não concluído) / Home (conectado + onboarding `done`).
+- [x] 46 novos testes automatizados (25 no desktop + 3 de streaming no control-plane + 6 nos adapters + 3 no routing-engine + outros), todos passando; build/lint/typecheck limpos em todo o monorepo.
+- [x] Validado no dev server real com Ollama local: mensagem enviada, tokens chegando incrementalmente (confirmado via WS real, não mock), rosto reagindo thinking → speaking → success, banner "Control Plane desconectado — reconectando…" aparecendo ao derrubar o Control Plane com a Home já aberta.
 
 ### O que existe hoje no ambiente (importante para continuar)
 - **Ollama local** instalado, rodando, com `llama3.2:1b`.
@@ -56,7 +68,7 @@ Próxima fase: **FASE 6 — Home, Chat e Rosto** (a primeira entrega verdadeiram
 
 ## 4. DECISÕES TOMADAS (ADRs)
 
-ADR-001 a ADR-012 — ver [docs/adr/](docs/adr/). Destaques recentes: **ADR-010** (keychain), **ADR-011** (providers configurados em runtime), **ADR-012** (CORS para origem do app desktop).
+ADR-001 a ADR-012 — ver [docs/adr/](docs/adr/). Destaques recentes: **ADR-010** (keychain), **ADR-011** (providers configurados em runtime), **ADR-012** (CORS para origem do app desktop). Nenhum ADR novo foi necessário na Fase 6 (decisão de reaproveitar o `/ws` existente em vez de SSE dedicado foi registrada só no commit, por ser reversível e de baixo impacto arquitetural).
 
 ## 5. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
 
@@ -64,26 +76,33 @@ ADR-001 a ADR-012 — ver [docs/adr/](docs/adr/). Destaques recentes: **ADR-010*
 packages/
   contracts/           + approval.ts, project.ts, onboarding.ts (Fase 5)
   security/            SecretStore, redactSensitiveKeys
-  openai-compatible-adapter/  cliente + adapter genérico /v1 OpenAI-compatible
+  model-gateway/        model-provider.ts agora com executeStream?() opcional; native-routing-engine.ts com stream() real
+  ollama-adapter/        ollama-client.ts com chatStream() (NDJSON); ollama-adapter.ts com executeStream()
+  openai-compatible-adapter/  openai-compatible-client.ts com chatStream() (SSE); adapter com executeStream()
   database/             + migrations 003 (providers), 004 (autonomy_config), 005 (projects), 006 (onboarding_progress)
 
 apps/control-plane/src/
   server.ts             + CORS (@fastify/cors), endpoints de onboarding/projects/settings/autonomy/providers/config
+                         + /ws com protocolo model_stream_start/token/done/error/cancel (Fase 6)
   provider-config-store.ts, autonomy-config-store.ts, project-store.ts, onboarding-store.ts  (Fase 5)
   main.ts               instancia todos os stores acima, recarrega providers configurados no boot
 
 apps/desktop/src/
-  Onboarding.tsx         NOVO — wizard de 9 etapas, retomável
-  ProjectsPanel.tsx      NOVO — seletor nativo de pasta (Tauri dialog) + lista de projetos
-  App.tsx                decide entre Onboarding ou tela de diagnóstico com base no progresso real
-  control-plane-client.ts  cliente HTTP tipado, agora cobrindo todos os endpoints da Fase 5
+  face/                  NOVO (Fase 6) — Face.tsx (SVG, 14 estados), face-state.ts, event-to-face-state.ts
+  chat/                  NOVO (Fase 6) — ChatSocket (cliente do /ws), ChatPanel.tsx (Markdown/streaming)
+  home/                  NOVO (Fase 6) — Home.tsx (layout 3 colunas: nav + rosto/chat + "seu dia")
+  Onboarding.tsx         wizard de 9 etapas, retomável (Fase 5)
+  ProjectsPanel.tsx      seletor nativo de pasta (Tauri dialog) + lista de projetos (Fase 5), agora dentro da Home
+  App.tsx                decide entre diagnóstico / Onboarding / Home com base no estado real
+  control-plane-client.ts  cliente HTTP tipado (REST); streaming vive em chat/chat-socket.ts (WS)
 ```
 
 ## 6. PRÓXIMOS PASSOS IMEDIATOS (ordem)
 
-1. **Commitar a Fase 5 completa** (incluindo a correção de CORS) em commits pequenos. Merge das branches `phase/05-onboarding-secrets` e `phase/05-onboarding-secrets-part2` → `develop` → `master`, push.
-2. Iniciar **Fase 6 — Home, Chat e Rosto**: já há tarefas planejadas (streaming real, sistema de rosto/avatar SVG, layout de Home, chat funcional, estados offline/erro + acessibilidade).
-3. Continuar validando cada entrega visual rodando o app real — a lição desta sessão é que testes automatizados sozinhos não garantem que o app funciona de verdade no ambiente real do usuário.
+1. **Merge da Fase 6**: branch `phase/06-home-chat-face` → `develop` → `master`, push (ainda não feito nesta sessão — só commits locais).
+2. Ler a seção correspondente à **Fase 7** em [prompt_Inicial.md](prompt_Inicial.md) e planejar as tarefas antes de começar a codar.
+3. Pendência de UX/distribuição ainda não resolvida (ver seção 2 abaixo): bloqueio do Windows Application Control sobre o `.exe` não assinado — usuário sinalizou "ver depois", possivelmente relevante na Fase 18 (empacotamento/assinatura de código).
+4. Continuar validando cada entrega visual rodando o app real (dev server ou Tauri) — testes automatizados sozinhos não garantem que o app funciona de verdade (lição reconfirmada nesta fase: o comportamento de streaming e o banner de desconexão só foram validados com confiança total ao rodar o Control Plane e o Ollama de verdade, não só com mocks).
 
 ## 7. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
 
