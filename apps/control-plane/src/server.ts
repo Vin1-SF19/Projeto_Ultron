@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import type { EventBus } from '@ultron/event-bus';
 import type { OpenClawAdapter } from '@ultron/openclaw-adapter';
 import type { RoutingEngine, ModelProviderAdapter, ModelRunHandle } from '@ultron/model-gateway';
 import { OpenAiCompatibleAdapter } from '@ultron/openai-compatible-adapter';
+import { ElevenLabsClient } from '@ultron/elevenlabs-adapter';
 import { autonomyLevelSchema, onboardingStepSchema, providerKindSchema, routingProfileIdSchema } from '@ultron/contracts';
 import type { Logger } from './logger.js';
 import { buildChatMessages } from './chat-messages.js';
@@ -15,6 +17,7 @@ import type { ProviderConfigStore } from './provider-config-store.js';
 import type { AutonomyConfigStore } from './autonomy-config-store.js';
 import { InvalidProjectPathError, type ProjectStore } from './project-store.js';
 import type { OnboardingStore } from './onboarding-store.js';
+import type { VoiceConfigStore } from './voice-config-store.js';
 import { detectEnvironment } from './environment.js';
 import { UltronError, toErrorResponseBody } from './errors.js';
 
@@ -30,6 +33,7 @@ export interface ServerDeps {
   autonomyConfigStore: AutonomyConfigStore;
   projectStore: ProjectStore;
   onboardingStore: OnboardingStore;
+  voiceConfigStore: VoiceConfigStore;
   dbFilePath: string;
   startedAt: Date;
 }
@@ -61,6 +65,7 @@ export async function buildServer(deps: ServerDeps) {
   });
 
   await app.register(websocketPlugin);
+  await app.register(multipart, { limits: { fileSize: 25 * 1024 * 1024 } });
 
   app.addHook('onRequest', async (request, reply) => {
     const incoming = request.headers[CORRELATION_HEADER];
@@ -384,6 +389,107 @@ export async function buildServer(deps: ServerDeps) {
         details: { profileId: profileId.data, error: message },
       });
       throw new UltronError('routing_failed', message, 503);
+    }
+  });
+
+  app.get('/api/v1/settings/voice', async () => {
+    return deps.voiceConfigStore.get();
+  });
+
+  app.put('/api/v1/settings/voice', async (request) => {
+    const body = request.body as { apiKey?: string; voiceId?: string; voiceName?: string };
+    if (!body?.apiKey || !body?.voiceId || !body?.voiceName) {
+      throw new UltronError('invalid_request', 'Campos obrigatórios: apiKey, voiceId, voiceName', 400);
+    }
+
+    const client = new ElevenLabsClient(body.apiKey);
+    const valid = await client.verifyKey();
+    if (!valid) {
+      throw new UltronError('invalid_credential', 'A chave da ElevenLabs informada não é válida.', 400);
+    }
+
+    const config = await deps.voiceConfigStore.configure({
+      apiKey: body.apiKey,
+      voiceId: body.voiceId,
+      voiceName: body.voiceName,
+    });
+
+    deps.auditLog.record({
+      correlationId: request.correlationId,
+      actorType: 'user',
+      action: 'voice.configured',
+      outcome: 'success',
+      details: { voiceId: body.voiceId, voiceName: body.voiceName },
+    });
+
+    return config;
+  });
+
+  app.get('/api/v1/voices', async () => {
+    const apiKey = await deps.voiceConfigStore.getApiKey();
+    if (!apiKey) {
+      return { voices: [], configured: false };
+    }
+    const client = new ElevenLabsClient(apiKey);
+    const voices = await client.listVoices();
+    return { voices, configured: true };
+  });
+
+  app.post('/api/v1/voice/speak', async (request, reply) => {
+    const body = request.body as { text?: string };
+    if (!body?.text) {
+      throw new UltronError('invalid_request', 'Campo obrigatório: text', 400);
+    }
+
+    const apiKey = await deps.voiceConfigStore.getApiKey();
+    const voiceConfig = deps.voiceConfigStore.get();
+    if (!apiKey || !voiceConfig.voiceId) {
+      throw new UltronError('voice_not_configured', 'Voz ainda não configurada (defina em Configurações).', 400);
+    }
+
+    try {
+      const client = new ElevenLabsClient(apiKey);
+      const audio = await client.textToSpeech({ voiceId: voiceConfig.voiceId, text: body.text });
+      reply.header('content-type', 'audio/mpeg');
+      return reply.send(Buffer.from(audio));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new UltronError('voice_synthesis_failed', message, 502);
+    }
+  });
+
+  app.post('/api/v1/voice/transcribe', async (request) => {
+    const file = await request.file();
+    if (!file) {
+      throw new UltronError('invalid_request', 'Envie o áudio como multipart/form-data (campo "audio").', 400);
+    }
+
+    const apiKey = await deps.voiceConfigStore.getApiKey();
+    if (!apiKey) {
+      throw new UltronError('voice_not_configured', 'Voz ainda não configurada (defina em Configurações).', 400);
+    }
+
+    try {
+      const buffer = await file.toBuffer();
+      const client = new ElevenLabsClient(apiKey);
+      const result = await client.speechToText({
+        audio: new Uint8Array(buffer),
+        filename: file.filename,
+        mimeType: file.mimetype,
+      });
+
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'voice.transcribed',
+        outcome: 'success',
+        details: { languageCode: result.languageCode },
+      });
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new UltronError('voice_transcription_failed', message, 502);
     }
   });
 

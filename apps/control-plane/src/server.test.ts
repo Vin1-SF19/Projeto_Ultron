@@ -15,6 +15,7 @@ import { ProviderConfigStore } from './provider-config-store.js';
 import { AutonomyConfigStore } from './autonomy-config-store.js';
 import { ProjectStore } from './project-store.js';
 import { OnboardingStore } from './onboarding-store.js';
+import { VoiceConfigStore } from './voice-config-store.js';
 
 /** SecretStore in-memory — nunca toca o keychain real do SO durante os testes. */
 function makeFakeSecretStore(): SecretStore {
@@ -76,8 +77,9 @@ describe('control plane server', () => {
     const autonomyConfigStore = new AutonomyConfigStore(db);
     const projectStore = new ProjectStore(db);
     const onboardingStore = new OnboardingStore(db);
+    const voiceConfigStore = new VoiceConfigStore(db, secretStore);
 
-    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter, routingEngine, secretStore, providerConfigStore, routingAdapters, autonomyConfigStore, projectStore, onboardingStore };
+    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter, routingEngine, secretStore, providerConfigStore, routingAdapters, autonomyConfigStore, projectStore, onboardingStore, voiceConfigStore };
   }
 
   async function buildTestServer(routingEngineOverrides: Partial<RoutingEngine> = {}) {
@@ -95,6 +97,7 @@ describe('control plane server', () => {
       autonomyConfigStore: deps.autonomyConfigStore,
       projectStore: deps.projectStore,
       onboardingStore: deps.onboardingStore,
+      voiceConfigStore: deps.voiceConfigStore,
       dbFilePath: ':memory:',
       startedAt: new Date(),
     });
@@ -485,6 +488,73 @@ describe('control plane server', () => {
     const body = response.json();
     expect(body.error).toBeDefined();
     expect(body.error.correlationId).toBeTruthy();
+  });
+
+  describe('voz (ElevenLabs)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('GET /api/v1/settings/voice reporta configured=false quando nada foi configurado', async () => {
+      const { app } = await buildTestServer();
+
+      const response = await app.inject({ method: 'GET', url: '/api/v1/settings/voice' });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ configured: false });
+    });
+
+    it('PUT /api/v1/settings/voice rejeita quando a chave não é válida (verificada de verdade contra a API)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+      const { app } = await buildTestServer();
+
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings/voice',
+        payload: { apiKey: 'chave-invalida', voiceId: 'abc123', voiceName: 'George' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe('invalid_credential');
+    });
+
+    it('PUT /api/v1/settings/voice salva a configuração quando a chave é válida, e GET reflete o estado salvo', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ voices: [] }) }));
+      const { app } = await buildTestServer();
+
+      const putResponse = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/settings/voice',
+        payload: { apiKey: 'chave-valida', voiceId: 'abc123', voiceName: 'George' },
+      });
+      expect(putResponse.statusCode).toBe(200);
+      expect(putResponse.json()).toEqual({ configured: true, voiceId: 'abc123', voiceName: 'George' });
+
+      const getResponse = await app.inject({ method: 'GET', url: '/api/v1/settings/voice' });
+      expect(getResponse.json()).toEqual({ configured: true, voiceId: 'abc123', voiceName: 'George' });
+    });
+
+    it('GET /api/v1/voices retorna configured=false e lista vazia quando a voz não está configurada', async () => {
+      const { app } = await buildTestServer();
+
+      const response = await app.inject({ method: 'GET', url: '/api/v1/voices' });
+
+      expect(response.json()).toEqual({ voices: [], configured: false });
+    });
+
+    it('POST /api/v1/voice/speak retorna erro claro quando a voz não está configurada (nunca finge sucesso)', async () => {
+      const { app } = await buildTestServer();
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/v1/voice/speak',
+        payload: { text: 'Olá' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe('voice_not_configured');
+    });
   });
 
   describe('/ws streaming de modelo (model_stream_*)', () => {

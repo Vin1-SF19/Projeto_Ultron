@@ -16,14 +16,15 @@ describe('runMigrations', () => {
       '004_autonomy_config',
       '005_projects',
       '006_onboarding_progress',
+      '007_voice_config',
     ]);
 
     const tables = db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('events', 'audit_events', 'providers', 'autonomy_config', 'bounded_autonomy_rules', 'projects')",
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('events', 'audit_events', 'providers', 'autonomy_config', 'bounded_autonomy_rules', 'projects', 'voice_config')",
       )
       .all();
-    expect(tables).toHaveLength(6);
+    expect(tables).toHaveLength(7);
 
     db.close();
   });
@@ -166,6 +167,22 @@ describe('runMigrations', () => {
     expect(row.current_step).toBe('welcome');
     expect(row.completed_steps).toBe('[]');
     expect(row.completed_at).toBeNull();
+
+    db.close();
+  });
+
+  it('permite configurar voice_config com secret_ref, nunca com a apiKey em si', () => {
+    const db = openDatabase({ filePath: ':memory:' });
+    runMigrations(db, allMigrations);
+
+    db.prepare(
+      `INSERT INTO voice_config (id, secret_ref, voice_id, voice_name) VALUES (1, @secret_ref, @voice_id, @voice_name)`,
+    ).run({ secret_ref: 'ultron:voice:elevenlabs', voice_id: 'JBFqnCBsd6RMkjVDRZzb', voice_name: 'George' });
+
+    const row = db.prepare('SELECT * FROM voice_config WHERE id = 1').get() as Record<string, unknown>;
+    expect(row.secret_ref).toBe('ultron:voice:elevenlabs');
+    expect(row.voice_id).toBe('JBFqnCBsd6RMkjVDRZzb');
+    expect(Object.values(row).join('')).not.toContain('sk_fake_secret_should_never_be_here');
 
     db.close();
   });

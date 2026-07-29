@@ -20,6 +20,7 @@ import { ProviderConfigStore } from './provider-config-store.js';
 import { AutonomyConfigStore } from './autonomy-config-store.js';
 import { ProjectStore } from './project-store.js';
 import { OnboardingStore } from './onboarding-store.js';
+import { VoiceConfigStore } from './voice-config-store.js';
 
 const DATA_DIR = path.join(os.homedir(), '.ultron');
 const DB_FILE_PATH = path.join(DATA_DIR, 'ultron.sqlite');
@@ -68,6 +69,7 @@ async function main() {
   const autonomyConfigStore = new AutonomyConfigStore(db);
   const projectStore = new ProjectStore(db);
   const onboardingStore = new OnboardingStore(db);
+  const voiceConfigStore = new VoiceConfigStore(db, secretStore);
 
   const adapters = new Map<string, ModelProviderAdapter>([['ollama', new OllamaAdapter()]]);
 
@@ -112,6 +114,7 @@ async function main() {
     autonomyConfigStore,
     projectStore,
     onboardingStore,
+    voiceConfigStore,
     dbFilePath: DB_FILE_PATH,
     startedAt,
   });

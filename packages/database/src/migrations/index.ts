@@ -5,6 +5,7 @@ import { migration003Providers } from './003_providers.js';
 import { migration004AutonomyConfig } from './004_autonomy_config.js';
 import { migration005Projects } from './005_projects.js';
 import { migration006OnboardingProgress } from './006_onboarding_progress.js';
+import { migration007VoiceConfig } from './007_voice_config.js';
 
 export const allMigrations: Migration[] = [
   migration001EventStore,
@@ -13,4 +14,5 @@ export const allMigrations: Migration[] = [
   migration004AutonomyConfig,
   migration005Projects,
   migration006OnboardingProgress,
+  migration007VoiceConfig,
 ];

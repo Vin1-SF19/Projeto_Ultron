@@ -4,3 +4,4 @@ export * from './model-gateway.js';
 export * from './approval.js';
 export * from './project.js';
 export * from './onboarding.js';
+export * from './voice.js';
