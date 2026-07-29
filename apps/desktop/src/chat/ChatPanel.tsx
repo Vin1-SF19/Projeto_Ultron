@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatSocket, type ChatSocketStatus } from './chat-socket.js';
 import type { ChatMessage } from './chat-types.js';
-import { synthesizeSpeech, VoiceNotConfiguredError } from './voice-client.js';
+import { synthesizeSpeech, transcribeAudio, VoiceNotConfiguredError } from './voice-client.js';
+import { MicrophonePermissionDeniedError, VoiceRecorder } from './voice-recorder.js';
 import './chat.css';
 
 export interface ChatPanelProps {
@@ -11,17 +12,25 @@ export interface ChatPanelProps {
 
 const PROFILE_ID = 'chat-fast';
 
+type MicState = 'idle' | 'recording' | 'transcribing';
+
 export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
   const socketRef = useRef<ChatSocket | undefined>(undefined);
   const [socketStatus, setSocketStatus] = useState<ChatSocketStatus>('connecting');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [showTextChat, setShowTextChat] = useState(false);
+  const [micState, setMicState] = useState<MicState>('idle');
+  const [micError, setMicError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recorderRef = useRef<VoiceRecorder | undefined>(undefined);
 
   useEffect(() => {
+    recorderRef.current = new VoiceRecorder();
     return () => {
+      recorderRef.current?.cancel();
       if (audioRef.current) {
         audioRef.current.pause();
         URL.revokeObjectURL(audioRef.current.src);
@@ -69,16 +78,14 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
     }
   }, [messages]);
 
-  function send() {
-    const text = input.trim();
-    if (!text || sending || !socketRef.current) return;
+  function sendText(text: string) {
+    if (!text.trim() || sending || !socketRef.current) return;
 
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text };
     const assistantId = crypto.randomUUID();
     const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', streaming: true };
 
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
-    setInput('');
     setSending(true);
     onFaceEvent?.('model_stream_start');
 
@@ -113,10 +120,55 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
     });
   }
 
+  function handleSendClick() {
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    sendText(text);
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      send();
+      handleSendClick();
+    }
+  }
+
+  async function handleMicClick() {
+    if (micState === 'idle') {
+      setMicError(null);
+      try {
+        await recorderRef.current?.start();
+        setMicState('recording');
+        onFaceEvent?.('voice.listening.started');
+      } catch (error) {
+        if (error instanceof MicrophonePermissionDeniedError) {
+          setMicError('Permissão de microfone negada. Habilite o acesso ao microfone para conversar por voz.');
+        } else {
+          setMicError('Não foi possível acessar o microfone.');
+        }
+      }
+      return;
+    }
+
+    if (micState === 'recording') {
+      setMicState('transcribing');
+      try {
+        const audio = await recorderRef.current!.stop();
+        onFaceEvent?.('voice.transcript.partial');
+        const result = await transcribeAudio(audio, 'gravacao.webm');
+        setMicState('idle');
+        if (result.text.trim()) {
+          sendText(result.text);
+        }
+      } catch (error) {
+        setMicState('idle');
+        if (error instanceof VoiceNotConfiguredError) {
+          setMicError('Voz ainda não configurada — configure em Configurações para conversar por voz.');
+        } else {
+          setMicError('Não foi possível transcrever o áudio.');
+        }
+      }
     }
   }
 
@@ -124,45 +176,81 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
 
   return (
     <div className="chat-panel">
-      <div className="chat-panel__messages" ref={scrollRef}>
-        {messages.length === 0 && (
-          <div className="chat-panel__empty">Converse com o Ultron. Nada foi enviado ainda.</div>
-        )}
-        {messages.map((message) => (
-          <div key={message.id} className={`chat-message chat-message--${message.role}`}>
-            <div className="chat-message__bubble">
-              <ReactMarkdown>{message.content || (message.streaming ? '…' : '')}</ReactMarkdown>
-              {message.error && <div className="chat-message__error">Erro: {message.error}</div>}
-              {message.modelId && !message.error && (
-                <div className="chat-message__meta">
-                  {message.providerId} · {message.modelId}
-                </div>
-              )}
-            </div>
+      <div className="chat-panel__voice-controls">
+        <button
+          type="button"
+          className={`chat-panel__mic-button chat-panel__mic-button--${micState}`}
+          onClick={() => void handleMicClick()}
+          disabled={offline || micState === 'transcribing'}
+          aria-pressed={micState === 'recording'}
+          aria-label={
+            micState === 'recording' ? 'Parar de gravar' : micState === 'transcribing' ? 'Transcrevendo…' : 'Falar com o Ultron'
+          }
+        >
+          {micState === 'recording' ? '⏹ Ouvindo…' : micState === 'transcribing' ? '… Transcrevendo' : '🎤 Falar'}
+        </button>
+
+        {micError && (
+          <div className="chat-panel__mic-error" role="alert">
+            {micError}
           </div>
-        ))}
+        )}
+
+        <label className="chat-panel__toggle-text">
+          <input type="checkbox" checked={showTextChat} onChange={(e) => setShowTextChat(e.target.checked)} />
+          Mostrar chat de texto
+        </label>
       </div>
 
-      {offline && (
+      {showTextChat && (
+        <>
+          <div className="chat-panel__messages" ref={scrollRef}>
+            {messages.length === 0 && (
+              <div className="chat-panel__empty">Converse com o Ultron. Nada foi enviado ainda.</div>
+            )}
+            {messages.map((message) => (
+              <div key={message.id} className={`chat-message chat-message--${message.role}`}>
+                <div className="chat-message__bubble">
+                  <ReactMarkdown>{message.content || (message.streaming ? '…' : '')}</ReactMarkdown>
+                  {message.error && <div className="chat-message__error">Erro: {message.error}</div>}
+                  {message.modelId && !message.error && (
+                    <div className="chat-message__meta">
+                      {message.providerId} · {message.modelId}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {offline && (
+            <div className="chat-panel__offline-banner" role="status">
+              Control Plane desconectado — reconectando…
+            </div>
+          )}
+
+          <div className="chat-panel__composer">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Escreva uma mensagem…"
+              rows={2}
+              disabled={offline}
+              aria-label="Mensagem para o Ultron"
+            />
+            <button type="button" onClick={handleSendClick} disabled={offline || sending || !input.trim()}>
+              Enviar
+            </button>
+          </div>
+        </>
+      )}
+
+      {!showTextChat && offline && (
         <div className="chat-panel__offline-banner" role="status">
           Control Plane desconectado — reconectando…
         </div>
       )}
-
-      <div className="chat-panel__composer">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Escreva uma mensagem…"
-          rows={2}
-          disabled={offline}
-          aria-label="Mensagem para o Ultron"
-        />
-        <button type="button" onClick={send} disabled={offline || sending || !input.trim()}>
-          Enviar
-        </button>
-      </div>
     </div>
   );
 }

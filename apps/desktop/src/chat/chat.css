@@ -5,6 +5,62 @@
   min-height: 0;
 }
 
+.chat-panel__voice-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  flex-wrap: wrap;
+}
+
+.chat-panel__mic-button {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.95em;
+  cursor: pointer;
+  background: #3ba7ff;
+  color: #04101c;
+}
+
+.chat-panel__mic-button--recording {
+  background: #e5484d;
+  color: #fff;
+  animation: chat-mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chat-mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.chat-panel__mic-button--transcribing {
+  background: #4a5568;
+  color: #cbd5e0;
+  cursor: wait;
+}
+
+.chat-panel__mic-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-panel__mic-error {
+  color: #f5c542;
+  font-size: 0.85em;
+}
+
+.chat-panel__toggle-text {
+  margin-left: auto;
+  font-size: 0.8em;
+  opacity: 0.7;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
 .chat-panel__messages {
   flex: 1;
   overflow-y: auto;

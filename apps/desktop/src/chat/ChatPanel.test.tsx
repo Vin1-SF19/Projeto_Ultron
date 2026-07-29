@@ -39,6 +39,10 @@ class FakeWebSocket {
   }
 }
 
+async function enableTextChat(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('checkbox', { name: /mostrar chat de texto/i }));
+}
+
 beforeEach(() => {
   // Por padrão, /api/v1/voice/speak responde "não configurada" — cenário mais
   // comum antes do usuário configurar uma voz. Testes específicos de voz
@@ -60,22 +64,33 @@ afterEach(() => {
 });
 
 describe('ChatPanel', () => {
-  it('mostra aviso de desconectado antes do socket abrir e desabilita o composer', () => {
+  it('o chat de texto fica oculto por padrão — só o botão de microfone e o toggle aparecem', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
     render(<ChatPanel />);
 
+    expect(screen.getByRole('button', { name: /falar com o ultron/i })).toBeDefined();
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('ao marcar "mostrar chat de texto", exibe o composer; antes disso o offline banner ainda aparece', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
     expect(screen.getByRole('status').textContent).toMatch(/reconectando/i);
+
+    await enableTextChat(user);
     expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(true);
   });
 
-  it('envia mensagem, recebe tokens incrementalmente e finaliza com metadados do provider', async () => {
+  it('envia mensagem de texto, recebe tokens incrementalmente e finaliza com metadados do provider', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
     const user = userEvent.setup();
     render(<ChatPanel />);
 
     const ws = FakeWebSocket.instances[0]!;
     ws.emitOpen();
-
+    await enableTextChat(user);
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
 
     const textarea = screen.getByRole('textbox');
@@ -114,6 +129,7 @@ describe('ChatPanel', () => {
 
     const ws = FakeWebSocket.instances[0]!;
     ws.emitOpen();
+    await enableTextChat(user);
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
 
     await user.type(screen.getByRole('textbox'), 'oi');
@@ -133,6 +149,7 @@ describe('ChatPanel', () => {
 
     const ws = FakeWebSocket.instances[0]!;
     ws.emitOpen();
+    await enableTextChat(user);
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
 
     await user.type(screen.getByRole('textbox'), 'oi');
@@ -179,6 +196,7 @@ describe('ChatPanel', () => {
 
     const ws = FakeWebSocket.instances[0]!;
     ws.emitOpen();
+    await enableTextChat(user);
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
 
     await user.type(screen.getByRole('textbox'), 'oi');
@@ -196,5 +214,83 @@ describe('ChatPanel', () => {
 
     fakeAudio.listeners.get('ended')?.();
     expect(onFaceEvent).toHaveBeenCalledWith('voice.response.ended');
+  });
+
+  describe('conversa por voz (microfone)', () => {
+    function stubMicrophone(getUserMediaImpl?: () => Promise<MediaStream>) {
+      const track = { stop: vi.fn() };
+      const stream = { getTracks: () => [track] } as unknown as MediaStream;
+      vi.stubGlobal('navigator', {
+        mediaDevices: { getUserMedia: getUserMediaImpl ?? vi.fn().mockResolvedValue(stream) },
+      });
+
+      class FakeMediaRecorder {
+        static isTypeSupported = vi.fn().mockReturnValue(true);
+        state: 'inactive' | 'recording' = 'inactive';
+        mimeType = 'audio/webm';
+        listeners = new Map<string, Array<(event: unknown) => void>>();
+        addEventListener(type: string, listener: (event: unknown) => void) {
+          const list = this.listeners.get(type) ?? [];
+          list.push(listener);
+          this.listeners.set(type, list);
+        }
+        start() {
+          this.state = 'recording';
+        }
+        stop() {
+          this.state = 'inactive';
+          for (const l of this.listeners.get('dataavailable') ?? []) l({ data: new Blob(['x']) });
+          for (const l of this.listeners.get('stop') ?? []) l({});
+        }
+      }
+      vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
+      return { stream, track };
+    }
+
+    it('clicar em "Falar" pede permissão de microfone e começa a gravar', async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      stubMicrophone();
+      const user = userEvent.setup();
+      render(<ChatPanel />);
+      FakeWebSocket.instances[0]!.emitOpen();
+
+      await user.click(screen.getByRole('button', { name: /falar com o ultron/i }));
+
+      expect(await screen.findByRole('button', { name: /parar de gravar/i })).toBeDefined();
+    });
+
+    it('clicar de novo para parar transcreve o áudio e envia como mensagem automaticamente', async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      stubMicrophone();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ text: 'qual a capital da frança?', languageCode: 'por' }) }),
+      );
+      const user = userEvent.setup();
+      render(<ChatPanel />);
+      const ws = FakeWebSocket.instances[0]!;
+      ws.emitOpen();
+
+      await user.click(screen.getByRole('button', { name: /falar com o ultron/i }));
+      await screen.findByRole('button', { name: /parar de gravar/i });
+      await user.click(screen.getByRole('button', { name: /parar de gravar/i }));
+
+      await waitFor(() => {
+        const sent = ws.sent.map((s) => JSON.parse(s) as { text?: string });
+        expect(sent.some((m) => m.text === 'qual a capital da frança?')).toBe(true);
+      });
+    });
+
+    it('mostra erro claro quando a permissão de microfone é negada', async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      stubMicrophone(vi.fn().mockRejectedValue(new Error('denied')));
+      const user = userEvent.setup();
+      render(<ChatPanel />);
+      FakeWebSocket.instances[0]!.emitOpen();
+
+      await user.click(screen.getByRole('button', { name: /falar com o ultron/i }));
+
+      expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Permissão de microfone negada'));
+    });
   });
 });

@@ -88,7 +88,7 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByRole('img', { name: /rosto do ultron/i })).toBeDefined());
     expect(screen.getByRole('navigation', { name: /navegação principal/i })).toBeDefined();
-    expect(screen.getByLabelText('Mensagem para o Ultron')).toBeDefined();
+    expect(screen.getByRole('button', { name: /falar com o ultron/i })).toBeDefined();
   });
 
   it('mostra o onboarding quando ainda não foi concluído', async () => {
