@@ -1,9 +1,22 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { Face } from './Face.js';
 
+class FakeResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue(null) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+});
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('Face', () => {
@@ -18,15 +31,24 @@ describe('Face', () => {
     expect(face.className).toContain('ultron-face--speaking');
   });
 
-  it('quando hidden=true, não renderiza nada (opção de ocultar rosto)', () => {
-    render(<Face state="idle" hidden />);
-    expect(screen.queryByRole('img')).toBeNull();
+  it('sempre renderiza visível — não existe opção de ocultar o rosto', () => {
+    render(<Face state="idle" />);
+    expect(screen.getByRole('img')).toBeDefined();
   });
 
-  it('modo sem animação aplica a classe ultron-face--anim-none', () => {
-    render(<Face state="idle" animationIntensity="none" />);
+  it('respeita prefers-reduced-motion do sistema operacional (sem controle manual do usuário)', () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockReturnValue({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    );
+
+    render(<Face state="idle" />);
     const face = screen.getByRole('img');
-    expect(face.className).toContain('ultron-face--anim-none');
+    expect(face.className).toContain('ultron-face--reduced-motion');
   });
 
   it('cada estado obrigatório produz um aria-label legível e não vazio', () => {

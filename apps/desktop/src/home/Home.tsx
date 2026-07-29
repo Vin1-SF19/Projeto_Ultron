@@ -20,8 +20,6 @@ const NAV_ITEMS = [
 
 export function Home() {
   const [faceState, setFaceState] = useState<FaceState>('idle');
-  const [animationIntensity, setAnimationIntensity] = useState<'full' | 'reduced' | 'none'>('full');
-  const [faceHidden, setFaceHidden] = useState(false);
 
   const handleFaceEvent = useCallback((eventType: string) => {
     const nextState = faceStateForEvent(eventType);
@@ -43,28 +41,7 @@ export function Home() {
 
       <main className="home-center">
         <div className="home-center__face-area">
-          <Face state={faceState} animationIntensity={animationIntensity} hidden={faceHidden} />
-          <div className="home-center__face-controls">
-            <label>
-              <input
-                type="checkbox"
-                checked={faceHidden}
-                onChange={(e) => setFaceHidden(e.target.checked)}
-              />
-              Ocultar rosto
-            </label>
-            <label>
-              Animação:
-              <select
-                value={animationIntensity}
-                onChange={(e) => setAnimationIntensity(e.target.value as typeof animationIntensity)}
-              >
-                <option value="full">Completa</option>
-                <option value="reduced">Reduzida</option>
-                <option value="none">Nenhuma</option>
-              </select>
-            </label>
-          </div>
+          <Face state={faceState} />
         </div>
 
         <div className="home-center__chat">

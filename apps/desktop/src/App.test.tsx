@@ -14,6 +14,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// jsdom não implementa canvas — o rosto usa Canvas para o campo de
+// partículas, mas já trata ctx nulo com segurança (ver ParticleField.tsx).
+HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue(null) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
 describe('App', () => {
   it('mostra estado desconectado quando o Control Plane não responde', async () => {
     vi.stubGlobal(
