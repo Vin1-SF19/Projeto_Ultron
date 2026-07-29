@@ -9,12 +9,12 @@ describe('runMigrations', () => {
 
     const result = runMigrations(db, allMigrations);
 
-    expect(result.applied).toEqual(['001_event_store', '002_audit_events']);
+    expect(result.applied).toEqual(['001_event_store', '002_audit_events', '003_providers']);
 
     const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('events', 'audit_events')")
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('events', 'audit_events', 'providers')")
       .all();
-    expect(tables).toHaveLength(2);
+    expect(tables).toHaveLength(3);
 
     db.close();
   });
@@ -77,6 +77,30 @@ describe('runMigrations', () => {
 
     const row = db.prepare('SELECT * FROM audit_events WHERE id = ?').get('audit_1');
     expect(row).toBeDefined();
+
+    db.close();
+  });
+
+  it('permite inserir um provider com secret_ref, nunca com o segredo em si', () => {
+    const db = openDatabase({ filePath: ':memory:' });
+    runMigrations(db, allMigrations);
+
+    db.prepare(
+      `INSERT INTO providers (id, name, kind, base_url, secret_ref, enabled)
+       VALUES (@id, @name, @kind, @base_url, @secret_ref, @enabled)`,
+    ).run({
+      id: 'ollama-remote',
+      name: 'Ollama Remoto',
+      kind: 'api',
+      base_url: 'https://ollama.alpha-comex.com/v1',
+      secret_ref: 'ultron:provider:ollama-remote',
+      enabled: 1,
+    });
+
+    const row = db.prepare('SELECT * FROM providers WHERE id = ?').get('ollama-remote') as Record<string, unknown>;
+    expect(row).toBeDefined();
+    expect(row.secret_ref).toBe('ultron:provider:ollama-remote');
+    expect(Object.values(row).join('')).not.toContain('zQSTFEugrFp4Uf');
 
     db.close();
   });
