@@ -41,6 +41,9 @@ importers:
       '@ultron/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@ultron/event-bus':
+        specifier: workspace:*
+        version: link:../../packages/event-bus
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
@@ -131,6 +134,19 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.1)(jsdom@25.0.1)
+
+  packages/event-bus:
+    dependencies:
+      '@ultron/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
