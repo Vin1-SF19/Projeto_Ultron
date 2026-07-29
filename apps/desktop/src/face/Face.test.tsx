@@ -51,6 +51,16 @@ describe('Face', () => {
     expect(face.className).toContain('ultron-face--reduced-motion');
   });
 
+  it('mouthOpenness controla a abertura vertical da boca (lip sync por amplitude)', () => {
+    const { container, rerender } = render(<Face state="speaking" mouthOpenness={0} />);
+    const mouthClosed = container.querySelector('.ultron-face__mouth');
+    expect(mouthClosed?.getAttribute('ry')).toBe('2');
+
+    rerender(<Face state="speaking" mouthOpenness={1} />);
+    const mouthOpen = container.querySelector('.ultron-face__mouth');
+    expect(mouthOpen?.getAttribute('ry')).toBe('18');
+  });
+
   it('cada estado obrigatório produz um aria-label legível e não vazio', () => {
     const states = [
       'idle', 'listening', 'hearing', 'thinking', 'speaking', 'working',

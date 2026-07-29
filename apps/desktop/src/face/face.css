@@ -92,6 +92,13 @@
   transform: scaleY(0.08);
 }
 
+.ultron-face__mouth {
+  fill: var(--face-accent);
+  opacity: 0.85;
+  filter: drop-shadow(0 0 6px var(--face-accent));
+  transition: ry 60ms ease-out;
+}
+
 .ultron-face__eyes--blink .ultron-face__eye {
   transform-origin: center;
 }

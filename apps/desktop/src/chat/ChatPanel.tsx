@@ -4,17 +4,19 @@ import { ChatSocket, type ChatSocketStatus } from './chat-socket.js';
 import type { ChatMessage } from './chat-types.js';
 import { synthesizeSpeech, transcribeAudio, VoiceNotConfiguredError } from './voice-client.js';
 import { MicrophonePermissionDeniedError, VoiceRecorder } from './voice-recorder.js';
+import { AmplitudeLipSyncDriver } from './lip-sync.js';
 import './chat.css';
 
 export interface ChatPanelProps {
   onFaceEvent?: (eventType: string) => void;
+  onMouthOpennessChange?: (amplitude: number) => void;
 }
 
 const PROFILE_ID = 'chat-fast';
 
 type MicState = 'idle' | 'recording' | 'transcribing';
 
-export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
+export function ChatPanel({ onFaceEvent, onMouthOpennessChange }: ChatPanelProps) {
   const socketRef = useRef<ChatSocket | undefined>(undefined);
   const [socketStatus, setSocketStatus] = useState<ChatSocketStatus>('connecting');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -27,23 +29,27 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<VoiceRecorder | undefined>(undefined);
+  const lipSyncRef = useRef<AmplitudeLipSyncDriver | undefined>(undefined);
 
   useEffect(() => {
     recorderRef.current = new VoiceRecorder();
+    lipSyncRef.current = new AmplitudeLipSyncDriver((amplitude) => onMouthOpennessChange?.(amplitude));
     return () => {
       recorderRef.current?.cancel();
+      lipSyncRef.current?.stop();
       const audio = audioRef.current;
       if (audio) {
         audio.pause();
         URL.revokeObjectURL(audio.src);
       }
     };
-  }, []);
+  }, [onMouthOpennessChange]);
 
   /** Interrompe a fala em andamento (se houver) — nunca sobrepor voz do usuário com a do assistente. */
   function stopSpeaking() {
     const audio = audioRef.current;
     if (!audio) return;
+    lipSyncRef.current?.stop();
     audio.pause();
     URL.revokeObjectURL(audio.src);
     audioRef.current = null;
@@ -58,13 +64,18 @@ export function ChatPanel({ onFaceEvent }: ChatPanelProps) {
         audioRef.current = audio;
         setIsSpeaking(true);
         onFaceEvent?.('voice.response.started');
+        audio.addEventListener('playing', () => {
+          lipSyncRef.current?.start({ audio });
+        });
         audio.addEventListener('ended', () => {
+          lipSyncRef.current?.stop();
           URL.revokeObjectURL(url);
           audioRef.current = null;
           setIsSpeaking(false);
           onFaceEvent?.('voice.response.ended');
         });
         audio.addEventListener('error', () => {
+          lipSyncRef.current?.stop();
           URL.revokeObjectURL(url);
           audioRef.current = null;
           setIsSpeaking(false);

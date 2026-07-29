@@ -5,6 +5,8 @@ import './face.css';
 
 export interface FaceProps {
   state: FaceState;
+  /** Amplitude de fala normalizada (0-1), vinda do LipSyncDriver — abre a boca proporcionalmente. */
+  mouthOpenness?: number;
 }
 
 const STATE_LABELS: Record<FaceState, string> = {
@@ -44,7 +46,7 @@ function usePrefersReducedMotion(): boolean {
  * usuário) — a única concessão de movimento é prefers-reduced-motion do
  * sistema operacional, por acessibilidade real, não uma opção manual.
  */
-export function Face({ state }: FaceProps) {
+export function Face({ state, mouthOpenness = 0 }: FaceProps) {
   const [blinking, setBlinking] = useState(false);
   const blinkTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reducedMotion = usePrefersReducedMotion();
@@ -146,6 +148,15 @@ export function Face({ state }: FaceProps) {
           <path className="ultron-face__eye ultron-face__eye--left" d="M195 250 L232 264 L197 280 Z" />
           <path className="ultron-face__eye ultron-face__eye--right" d="M285 250 L248 264 L283 280 Z" />
         </g>
+
+        {/* Boca — abertura controlada por mouthOpenness (lip sync por amplitude, seção 25) */}
+        <ellipse
+          className="ultron-face__mouth"
+          cx="240"
+          cy="315"
+          rx="26"
+          ry={2 + mouthOpenness * 16}
+        />
       </svg>
 
       <span className="ultron-face__sr-only">{STATE_LABELS[state]}</span>

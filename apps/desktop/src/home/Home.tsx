@@ -20,6 +20,7 @@ const NAV_ITEMS = [
 
 export function Home() {
   const [faceState, setFaceState] = useState<FaceState>('idle');
+  const [mouthOpenness, setMouthOpenness] = useState(0);
 
   const handleFaceEvent = useCallback((eventType: string) => {
     const nextState = faceStateForEvent(eventType);
@@ -41,11 +42,11 @@ export function Home() {
 
       <main className="home-center">
         <div className="home-center__face-area">
-          <Face state={faceState} />
+          <Face state={faceState} mouthOpenness={mouthOpenness} />
         </div>
 
         <div className="home-center__chat">
-          <ChatPanel onFaceEvent={handleFaceEvent} />
+          <ChatPanel onFaceEvent={handleFaceEvent} onMouthOpennessChange={setMouthOpenness} />
         </div>
       </main>
 
