@@ -9,8 +9,8 @@ Baseado nas 20 fases definidas em [prompt_Inicial.md](../../prompt_Inicial.md), 
 | 2 | Control Plane e Event Bus | **Concluída** |
 | 3 | OpenClaw Adapter | **Concluída** |
 | 4 | Providers, modelos e router | **Concluída** (OpenAI/Claude/Codex pendentes de credencial do usuário) |
-| 5 | Onboarding e segredos | **Parcialmente concluída** — keychain e configuração de modelos prontos; onboarding com UI, seleção de pasta de projeto e permissões ainda pendentes |
-| 6 | Home, chat e rosto | Não iniciada |
+| 5 | Onboarding e segredos | **Concluída** — validada com o app real (onboarding, seleção de pasta, autonomia, keychain, providers) |
+| 6 | Home, chat e rosto | **Em andamento** |
 | 7 | Voz | Não iniciada |
 | 8 | Fila persistente | Não iniciada |
 | 9 | Project Engine | Não iniciada |
@@ -38,3 +38,5 @@ Ver [STATUS.md](../../STATUS.md) na raiz do projeto para o estado detalhado e os
 6. SDK oficial do OpenClaw (`@openclaw/gateway-client`/`gateway-protocol`) só existe funcional na tag `beta` — a tag `latest` do npm é um placeholder vazio. Nunca atualizar automaticamente sem `npm view` confirmando que a nova versão tem código real (ver ADR-007).
 7. Escopos de operador do OpenClaw por padrão não incluem `operator.read` — qualquer onboarding do Ultron que gere token do OpenClaw precisa configurar escopos explicitamente, nunca aceitar o default silenciosamente (ver ADR-008).
 8. Providers pagos (OpenAI, Anthropic API, Codex) não foram implementados na Fase 4 por exigirem credenciais do usuário — decisão sempre bloqueante (seção 56 do prompt mestre), mesmo sob janela de autonomia ampla. A interface `ModelProviderAdapter` já está pronta para receber esses adapters assim que o usuário fornecer as credenciais (Fase 5).
+9. Builds empacotados do Tauri (`tauri build`, diferente de `tauri dev`) rodam sob a origem `http://tauri.localhost`/`tauri://localhost`, estritamente cross-origin em relação ao Control Plane — qualquer novo endpoint precisa estar coberto pelo CORS configurado (ADR-012). `app.inject()` do Fastify não pega esse tipo de bug — validação manual no app real continua necessária.
+10. O WebView2 do Tauri mantém um perfil de cache persistente em `~/AppData/Local/<identifier>/EBWebView` entre execuções — em caso de comportamento "preso" numa versão antiga do frontend que não bate com o `.exe`/`dist` atual, considerar limpar esse diretório como parte do diagnóstico (não foi a causa do bug de CORS desta sessão, mas é uma variável real a descartar).

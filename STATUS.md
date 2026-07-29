@@ -2,7 +2,7 @@
 
 > Arquivo de continuidade. Se o contexto da conversa for perdido/resetado, leia este arquivo primeiro para saber exatamente onde o trabalho parou e o que fazer a seguir.
 
-Última atualização: 2026-07-29 (sessão da tarde, pós-retorno do usuário)
+Última atualização: 2026-07-29 (fim do dia)
 
 ---
 
@@ -18,78 +18,89 @@ Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branches `
 
 ## 2. ONDE PARAMOS (ESTADO ATUAL)
 
-**FASE 0 (Auditoria) — CONCLUÍDA.**
-**FASE 1 (Fundação do monorepo) — CONCLUÍDA.**
-**FASE 2 (Control Plane e Event Bus) — CONCLUÍDA.**
-**FASE 3 (OpenClaw Adapter) — CONCLUÍDA e VALIDADA CONTRA GATEWAY REAL.**
-**FASE 4 (Providers, modelos e router) — CONCLUÍDA e VALIDADA CONTRA OLLAMA REAL.**
-**FASE 5 (Onboarding e Segredos) — PARCIALMENTE CONCLUÍDA.** Keychain (`SecretStore`) e configuração de modelos/providers (persistência + API) prontos e validados end-to-end. **Ainda faltam**: onboarding com UI navegável no desktop, seleção de pasta de projeto, sistema de permissões/níveis de autonomia (tarefas #34, #35, #36 já criadas na lista de tasks).
+**FASES 0-5 CONCLUÍDAS.** Todas validadas com testes automatizados E com o app real rodando (Control Plane + Tauri compilado), não apenas com testes unitários.
 
-### Provider adicional configurado nesta sessão
+Próxima fase: **FASE 6 — Home, Chat e Rosto** (a primeira entrega verdadeiramente visual/interativa: chat funcional com streaming, avatar com estados reativos a eventos, layout de Home com navegação).
 
-O usuário forneceu credenciais de um **Ollama remoto próprio** (`https://ollama.alpha-comex.com/v1`, API compatível OpenAI, modelos 30B-35B: `qwen3-coder:30b`, `qwen3.6:35b`, `gemma4:e4b`, etc.). Configurado via `POST /api/v1/providers/config`, persistido como `provider.id = "ollama-remoto"`, segredo salvo no Windows Credential Manager (nunca no SQLite — verificado). Perfis `coding`, `deep-reasoning`, `high-quality` atualizados para preferir esse provider, com fallback para `ollama` local. **Isso é uma configuração deste ambiente específico, não um default de produto** — ver [ADR-011](docs/adr/ADR-011-user-configured-providers.md).
+### Resumo por fase
+- **Fase 0**: auditoria de 6 projetos de referência, arquitetura, threat model, ADRs 001-004.
+- **Fase 1**: monorepo, Control Plane (Fastify+WebSocket+SQLite), app Tauri mínimo.
+- **Fase 2**: Event Bus, Audit Log, erros padronizados, correlation IDs, replay por cursor.
+- **Fase 3**: OpenClaw Adapter, testado contra Gateway real instalado nesta sessão.
+- **Fase 4**: RoutingEngine com fallback/circuit breaker, Ollama local testado com inferência real.
+- **Fase 5**: keychain (`SecretStore`), configuração de providers em runtime (incl. Ollama remoto do usuário), sistema de autonomia/permissões, seleção de pasta de projeto, onboarding com UI retomável — **tudo validado rodando o app real**.
 
-**Nota de continuidade:** se uma sessão futura reiniciar o Control Plane do zero (banco `~/.ultron/ultron.sqlite` recriado), o provider `ollama-remoto` **não estará mais configurado** a menos que o SQLite anterior seja preservado — o teste desta sessão sempre limpou `~/.ultron` antes/depois. Se o usuário quiser esse provider disponível permanentemente, reconfigurar via `POST /api/v1/providers/config` (token está com o usuário, não deve ser reexibido em nenhum log desta conversa).
+### O que existe hoje no ambiente (importante para continuar)
+- **Ollama local** instalado, rodando, com `llama3.2:1b`.
+- **Ollama remoto do usuário** configurável via `POST /api/v1/providers/config` (não fica persistido entre reinícios de banco limpo — reconfigurar quando necessário; token não deve ser reexibido em log/terminal).
+- **OpenClaw CLI** instalado; Gateway pode ou não estar rodando em background — checar com `openclaw gateway status`.
+- **Rust, Cargo, Visual Studio Build Tools** instalados.
+- **Windows Application Control**: o usuário desativou uma política que bloqueava a execução do `.exe` de debug recém-compilado. Isso pode precisar ser revisitado para produção/distribuição real (usuário sinalizou "ver depois" — ficou registrado como pendência de UX/distribuição, não uma tarefa de fase específica ainda).
 
-### Checklist Fase 5 (parcial, concluído nesta sessão)
-- [x] [ADR-010](docs/adr/ADR-010-secret-storage.md): `@napi-rs/keyring` escolhido sobre `keytar` (deprecated). Confirmado prebuild para `win32-x64-msvc`.
-- [x] `packages/security`: `SecretStore` (set/get/delete via Windows Credential Manager, testado com mock e também validado contra o Credential Manager real) + `redactSensitiveKeys` (utilitário de redaction).
-- [x] Migration `003_providers` (tabela `providers`: id, name, kind, base_url, secret_ref, enabled — nunca a credencial em si).
-- [x] `packages/openai-compatible-adapter`: `OpenAiCompatibleClient` + `OpenAiCompatibleAdapter` (`ModelProviderAdapter` para qualquer endpoint `/v1` compatível OpenAI — reutilizável para OpenAI real no futuro). Testado (mock) garantindo que a API key nunca aparece em nenhum log/erro/retorno.
-- [x] `ProviderConfigStore` no control-plane: `upsert`/`list`/`getApiKey`/`remove`, persistindo metadados no SQLite e credencial no keychain.
-- [x] Endpoints: `POST /api/v1/providers/config`, `DELETE /api/v1/providers/config/:id` — atualizam o `Map` de adapters do `RoutingEngine` em memória imediatamente (sem reiniciar o processo), auditam sucesso/falha (`hasCredential: true/false`, nunca o valor).
-- [x] Perfis `coding`/`deep-reasoning`/`high-quality` atualizados para preferir `ollama-remoto` com fallback `ollama`.
-- [x] **Validado de ponta a ponta**: provider configurado via `curl` real, SQLite confirmado sem o token (checagem automatizada), keychain do Windows testado (escrita/leitura/exclusão reais), execução real via perfil `coding` retornando resposta correta do `qwen3-coder:30b` remoto, auditoria completa.
-- [x] 12 testes novos (security: 6, openai-compatible-adapter: 6) + 3 novos testes de endpoint no control-plane — total 76 testes em 10 pacotes, todos passando. Lint/typecheck/build limpos.
-- [ ] Onboarding com UI (tarefa #34).
-- [ ] Seleção de pasta de projeto (tarefa #35).
-- [ ] Sistema de permissões/autonomia (tarefa #36).
+### Checklist Fase 5 (completa, incluindo o que ficou pendente antes)
+- [x] `packages/security`: `SecretStore` via `@napi-rs/keyring` (ADR-010), `redactSensitiveKeys`.
+- [x] `packages/openai-compatible-adapter`: adapter genérico para qualquer `/v1` compatível OpenAI.
+- [x] `ProviderConfigStore`: persistência SQLite (metadados) + keychain (segredo) para providers configurados pelo usuário.
+- [x] Sistema de autonomia: `packages/contracts/approval.ts` (4 níveis + regras de autonomia delimitada), migration `004_autonomy_config`, `AutonomyConfigStore`, endpoints `GET/PUT /api/v1/settings/autonomy`.
+- [x] Seleção de pasta de projeto: `ProjectStore` (validação real de caminho/permissões, nunca escaneia disco às cegas), migration `005_projects`, endpoints `GET/POST/DELETE /api/v1/projects`, `@tauri-apps/plugin-dialog` integrado no desktop (`ProjectsPanel.tsx`).
+- [x] Onboarding com UI: `packages/contracts/onboarding.ts`, migration `006_onboarding_progress`, `OnboardingStore` (retomável — persiste `currentStep`/`completedSteps`), endpoints `GET /api/v1/onboarding`, `POST /api/v1/onboarding/advance`, `POST /api/v1/onboarding/reset`. Componente `Onboarding.tsx` no desktop com as 9 etapas reais (welcome, diagnostics, assistant, models, openclaw, projects, integrations, security, test) — cada etapa usa dados reais do Control Plane, nenhuma simulada.
+- [x] **Bug real encontrado e corrigido em produção**: CORS ausente no Control Plane impedia qualquer chamada do app empaconhado (origem `http://tauri.localhost`) além de `/health` — só descoberto ao testar o app de verdade (não pego pelos testes automatizados, que usam `app.inject()` e não simulam CORS de browser). Corrigido com `@fastify/cors` (ADR-012), 2 testes novos, validado no app real pelo usuário.
+- [x] 100 testes automatizados (10 pacotes), lint/typecheck/build limpos.
 
-## 3. INCIDENTE EVITADO NESTA SESSÃO (importante)
+## 3. LIÇÕES DE DIAGNÓSTICO DESTA SESSÃO (importantes para não repetir investigação)
 
-Ao investigar processos `node.exe` ativos para encerrar o Control Plane de teste, encontrei **5 processos node simultâneos**. Antes de matar por PID, verifiquei o `CommandLine` de cada um via `Get-CimInstance Win32_Process` — descobri que **3 deles eram do editor Cursor do usuário** (tsserver, typingsInstaller), não relacionados a este trabalho. Matá-los por engano teria sido um incidente sério (travar o editor do usuário). **Lição reforçada: sempre inspecionar o `CommandLine` completo de um PID antes de encerrá-lo, nunca assumir que "processo node.exe" = "meu processo de teste".**
+1. **"Failed to fetch" no app Tauri empacotado quase sempre é CORS**, não CSP — a origem real do WebView2 em build de produção é `http://tauri.localhost` (Windows) / `tauri://localhost` (outras plataformas), diferente de `http://localhost:1420` do dev server. Testar com `curl -H "Origin: http://tauri.localhost"` para reproduzir sem precisar abrir o app.
+2. `app.inject()` do Fastify **não simula CORS** — um endpoint pode passar em todos os testes automatizados e ainda assim falhar no browser real por falta de CORS. Sempre que adicionar/mudar rotas, também validar manualmente no app real quando possível.
+3. Ao investigar comportamento "grudado" numa versão antiga do frontend, checar (em ordem de probabilidade real observada): (a) se o `dist/` foi rebuildado e o `.exe` recompilado *depois* dessa build (senão o Tauri empacota um `dist/` antigo), (b) CORS, (c) só por último o cache do WebView2 em `~/AppData/Local/<identifier>/EBWebView` — nesta sessão essa hipótese foi tentada e não era a causa, mas vale descartar rápido com um `rm -rf`.
+4. **Antes de encerrar qualquer processo por PID, sempre confirmar via `Get-CimInstance Win32_Process | Select ProcessId, CommandLine`** — nesta sessão isso preveniu matar acidentalmente processos do editor Cursor do usuário.
 
 ## 4. DECISÕES TOMADAS (ADRs)
 
-ADR-001 a ADR-011 — ver [docs/adr/](docs/adr/). Destaques da Fase 5: **ADR-010** (`@napi-rs/keyring` sobre `keytar`), **ADR-011** (providers configurados em runtime, específicos deste ambiente).
+ADR-001 a ADR-012 — ver [docs/adr/](docs/adr/). Destaques recentes: **ADR-010** (keychain), **ADR-011** (providers configurados em runtime), **ADR-012** (CORS para origem do app desktop).
 
 ## 5. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
 
 ```text
 packages/
-  security/                    NOVO na Fase 5 — SecretStore, redactSensitiveKeys
-  openai-compatible-adapter/    NOVO na Fase 5 — cliente + adapter genérico /v1 OpenAI-compatible
-  (demais inalterados desde Fase 4: contracts, database, event-bus, openclaw-adapter, model-gateway, ollama-adapter)
+  contracts/           + approval.ts, project.ts, onboarding.ts (Fase 5)
+  security/            SecretStore, redactSensitiveKeys
+  openai-compatible-adapter/  cliente + adapter genérico /v1 OpenAI-compatible
+  database/             + migrations 003 (providers), 004 (autonomy_config), 005 (projects), 006 (onboarding_progress)
 
 apps/control-plane/src/
-  provider-config-store.ts   NOVO — persistência de providers configurados (SQLite + keychain)
-  main.ts                     + SecretStore, ProviderConfigStore, recarrega providers configurados no boot
-  server.ts                    + POST/DELETE /api/v1/providers/config
-  routing-config.ts            perfis coding/deep-reasoning/high-quality agora preferem ollama-remoto
+  server.ts             + CORS (@fastify/cors), endpoints de onboarding/projects/settings/autonomy/providers/config
+  provider-config-store.ts, autonomy-config-store.ts, project-store.ts, onboarding-store.ts  (Fase 5)
+  main.ts               instancia todos os stores acima, recarrega providers configurados no boot
+
+apps/desktop/src/
+  Onboarding.tsx         NOVO — wizard de 9 etapas, retomável
+  ProjectsPanel.tsx      NOVO — seletor nativo de pasta (Tauri dialog) + lista de projetos
+  App.tsx                decide entre Onboarding ou tela de diagnóstico com base no progresso real
+  control-plane-client.ts  cliente HTTP tipado, agora cobrindo todos os endpoints da Fase 5
 ```
 
 ## 6. PRÓXIMOS PASSOS IMEDIATOS (ordem)
 
-1. **Commitar a Fase 5** em commits pequenos. Merge `phase/05-onboarding-secrets` → `develop` → `master`, push.
-2. Decidir com o usuário: completar o restante da Fase 5 (onboarding com UI, seleção de pasta, permissões — tarefas #34-36) antes de avançar, ou seguir direto para a Fase 6 (Home, Chat e Rosto) e voltar ao onboarding depois. Ambas as ordens são defensáveis; perguntar preferência.
-3. Seguir estritamente a ordem das 20 fases quando decidido.
+1. **Commitar a Fase 5 completa** (incluindo a correção de CORS) em commits pequenos. Merge das branches `phase/05-onboarding-secrets` e `phase/05-onboarding-secrets-part2` → `develop` → `master`, push.
+2. Iniciar **Fase 6 — Home, Chat e Rosto**: já há tarefas planejadas (streaming real, sistema de rosto/avatar SVG, layout de Home, chat funcional, estados offline/erro + acessibilidade).
+3. Continuar validando cada entrega visual rodando o app real — a lição desta sessão é que testes automatizados sozinhos não garantem que o app funciona de verdade no ambiente real do usuário.
 
 ## 7. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
 
 - Nunca instalar componentes de sistema sem confirmação explícita, salvo janela de autonomia vigente e específica.
-- **Credenciais de provider pago/serviço externo são SEMPRE bloqueantes** — mas uma vez que o usuário as forneceu voluntariamente no chat, tratar com o máximo cuidado: nunca reexibir em terminal/log, usar variável de ambiente ou arquivo temporário para repassar a ferramentas, nunca persistir fora do keychain do SO.
+- **Credenciais de provider pago/serviço externo são SEMPRE bloqueantes** — tratar com máximo cuidado quando fornecidas (nunca reexibir em terminal/log).
 - Nunca inventar que um comando funcionou — sempre registrar comando, resultado, exit code, erro real.
-- **Antes de encerrar qualquer processo por PID, inspecionar o `CommandLine` completo** (`Get-CimInstance Win32_Process`) — nunca assumir que todo `node.exe` é seu.
-- Nunca encerrar processos por nome de imagem genérico.
+- **Antes de encerrar qualquer processo por PID, inspecionar o `CommandLine` completo** — nunca assumir que todo `node.exe`/processo é seu.
 - Antes de usar qualquer SDK/pacote de terceiro, verificar com `npm view` que a versão real existe e não é um placeholder.
 - Um evento nunca deve ser publicado no EventBus antes de estar persistido no Event Store.
 - Toda resposta de erro da API segue o envelope `{ error: { code, message, correlationId, details? } }`.
 - Toda integração externa é opcional e desligada por padrão.
 - Nunca encadear dois routers de modelo no mesmo caminho de requisição.
 - Nunca instalar/baixar modelo local automaticamente sem confirmação.
-- Nunca inventar custo de provider — quando desconhecido, `estimatedCost` fica `undefined`, nunca um número inventado.
+- Nunca inventar custo de provider — quando desconhecido, `estimatedCost` fica `undefined`.
 - Identidade visual do Ultron deve ser 100% original — ícone atual é placeholder neutro.
-- Providers configurados via API ficam em memória (`Map` mutável compartilhado) — persistem entre requisições mas são recarregados do zero a cada reinício do processo (lidos do SQLite + keychain no boot).
+- **App Tauri empacotado roda sob origem `http://tauri.localhost`/`tauri://localhost` — todo novo endpoint do Control Plane precisa estar coberto pela lista de CORS em `ALLOWED_ORIGINS` (server.ts) e, se usar método novo (além de GET/POST/PUT/DELETE), declarar em `methods` no registro do plugin CORS.**
+- Testes automatizados com `app.inject()` não substituem validação manual no app real para bugs de CORS/rede/browser.
 
 ---
 
