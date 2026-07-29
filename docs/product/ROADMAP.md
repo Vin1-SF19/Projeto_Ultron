@@ -8,8 +8,8 @@ Baseado nas 20 fases definidas em [prompt_Inicial.md](../../prompt_Inicial.md), 
 | 1 | Fundação do monorepo | **Concluída** |
 | 2 | Control Plane e Event Bus | **Concluída** |
 | 3 | OpenClaw Adapter | **Concluída** |
-| 4 | Providers, modelos e router | **Em andamento** |
-| 5 | Onboarding e segredos | Não iniciada |
+| 4 | Providers, modelos e router | **Concluída** (OpenAI/Claude/Codex pendentes de credencial do usuário) |
+| 5 | Onboarding e segredos | **Em andamento** |
 | 6 | Home, chat e rosto | Não iniciada |
 | 7 | Voz | Não iniciada |
 | 8 | Fila persistente | Não iniciada |
@@ -37,3 +37,4 @@ Ver [STATUS.md](../../STATUS.md) na raiz do projeto para o estado detalhado e os
 5. Projetos de referência com ritmo de release muito alto (OmniRoute, aiox-core) já tiveram releases quebradas — nunca seguir `latest` automaticamente nos adapters correspondentes.
 6. SDK oficial do OpenClaw (`@openclaw/gateway-client`/`gateway-protocol`) só existe funcional na tag `beta` — a tag `latest` do npm é um placeholder vazio. Nunca atualizar automaticamente sem `npm view` confirmando que a nova versão tem código real (ver ADR-007).
 7. Escopos de operador do OpenClaw por padrão não incluem `operator.read` — qualquer onboarding do Ultron que gere token do OpenClaw precisa configurar escopos explicitamente, nunca aceitar o default silenciosamente (ver ADR-008).
+8. Providers pagos (OpenAI, Anthropic API, Codex) não foram implementados na Fase 4 por exigirem credenciais do usuário — decisão sempre bloqueante (seção 56 do prompt mestre), mesmo sob janela de autonomia ampla. A interface `ModelProviderAdapter` já está pronta para receber esses adapters assim que o usuário fornecer as credenciais (Fase 5).
