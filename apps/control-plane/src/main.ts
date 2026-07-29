@@ -6,13 +6,17 @@ import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
 import { EventBus } from '@ultron/event-bus';
 import { OpenClawAdapter } from '@ultron/openclaw-adapter';
 import { NativeRoutingEngine } from '@ultron/model-gateway';
+import type { ModelProviderAdapter } from '@ultron/model-gateway';
 import { OllamaAdapter } from '@ultron/ollama-adapter';
+import { OpenAiCompatibleAdapter } from '@ultron/openai-compatible-adapter';
+import { SecretStore } from '@ultron/security';
 import { createLogger } from './logger.js';
 import { EventStore } from './event-store.js';
 import { AuditLog } from './audit-log.js';
 import { buildServer } from './server.js';
 import { loadOpenClawConfig } from './integrations-config.js';
 import { defaultRoutingProfiles } from './routing-config.js';
+import { ProviderConfigStore } from './provider-config-store.js';
 
 const DATA_DIR = path.join(os.homedir(), '.ultron');
 const DB_FILE_PATH = path.join(DATA_DIR, 'ultron.sqlite');
@@ -56,9 +60,35 @@ async function main() {
     logger.info('OpenClaw desabilitado (defina OPENCLAW_GATEWAY_URL para habilitar)');
   }
 
+  const secretStore = new SecretStore();
+  const providerConfigStore = new ProviderConfigStore(db, secretStore);
+
+  const adapters = new Map<string, ModelProviderAdapter>([['ollama', new OllamaAdapter()]]);
+
+  // Providers configurados pelo usuário (persistidos em fases anteriores)
+  // são recriados como adapters reais no boot — nunca com o segredo em
+  // texto plano, sempre buscado do keychain via ProviderConfigStore.
+  for (const provider of providerConfigStore.list()) {
+    if (provider.id === 'ollama') continue; // já coberto pelo adapter local nativo acima
+    const apiKey = await providerConfigStore.getApiKey(provider.id);
+    if (!apiKey || !provider.baseUrl) {
+      logger.warn({ providerId: provider.id }, 'provider configurado sem credencial/baseUrl válidos — ignorando');
+      continue;
+    }
+    adapters.set(
+      provider.id,
+      new OpenAiCompatibleAdapter({
+        providerId: provider.id,
+        displayName: provider.name,
+        baseUrl: provider.baseUrl,
+        apiKey,
+      }),
+    );
+  }
+
   const routingEngine = new NativeRoutingEngine({
     profiles: defaultRoutingProfiles(),
-    adapters: new Map([['ollama', new OllamaAdapter()]]),
+    adapters,
     onDecision: (decision) => {
       logger.info(decision, 'decisão de roteamento de modelo');
     },
@@ -71,6 +101,8 @@ async function main() {
     auditLog,
     openClawAdapter,
     routingEngine,
+    routingAdapters: adapters,
+    providerConfigStore,
     dbFilePath: DB_FILE_PATH,
     startedAt,
   });

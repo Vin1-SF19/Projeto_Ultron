@@ -3,11 +3,13 @@ import Fastify from 'fastify';
 import websocketPlugin from '@fastify/websocket';
 import type { EventBus } from '@ultron/event-bus';
 import type { OpenClawAdapter } from '@ultron/openclaw-adapter';
-import type { RoutingEngine } from '@ultron/model-gateway';
-import { routingProfileIdSchema } from '@ultron/contracts';
+import type { RoutingEngine, ModelProviderAdapter } from '@ultron/model-gateway';
+import { OpenAiCompatibleAdapter } from '@ultron/openai-compatible-adapter';
+import { providerKindSchema, routingProfileIdSchema } from '@ultron/contracts';
 import type { Logger } from './logger.js';
 import type { EventStore } from './event-store.js';
 import type { AuditLog } from './audit-log.js';
+import type { ProviderConfigStore } from './provider-config-store.js';
 import { detectEnvironment } from './environment.js';
 import { UltronError, toErrorResponseBody } from './errors.js';
 
@@ -18,6 +20,8 @@ export interface ServerDeps {
   auditLog: AuditLog;
   openClawAdapter: OpenClawAdapter;
   routingEngine: RoutingEngine;
+  routingAdapters: Map<string, ModelProviderAdapter>;
+  providerConfigStore: ProviderConfigStore;
   dbFilePath: string;
   startedAt: Date;
 }
@@ -119,6 +123,74 @@ export async function buildServer(deps: ServerDeps) {
 
   app.get('/api/v1/providers/health', async () => {
     return await deps.routingEngine.health();
+  });
+
+  app.post('/api/v1/providers/config', async (request) => {
+    const body = request.body as { name?: string; kind?: string; baseUrl?: string; apiKey?: string };
+    const kind = providerKindSchema.safeParse(body?.kind);
+    if (!body?.name || !kind.success) {
+      throw new UltronError('invalid_request', 'Campos obrigatórios: name, kind (válido)', 400);
+    }
+
+    try {
+      const provider = await deps.providerConfigStore.upsert({
+        name: body.name,
+        kind: kind.data,
+        baseUrl: body.baseUrl,
+        apiKey: body.apiKey,
+      });
+
+      // Registrar/atualizar o adapter em memória imediatamente — o próximo
+      // /models/execute já enxerga o provider recém-configurado, sem reiniciar.
+      if (provider.baseUrl && body.apiKey) {
+        deps.routingAdapters.set(
+          provider.id,
+          new OpenAiCompatibleAdapter({
+            providerId: provider.id,
+            displayName: provider.name,
+            baseUrl: provider.baseUrl,
+            apiKey: body.apiKey,
+          }),
+        );
+      }
+
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'provider.configured',
+        outcome: 'success',
+        targetType: 'provider',
+        targetId: provider.id,
+        details: { name: provider.name, kind: provider.kind, hasCredential: Boolean(body.apiKey) },
+      });
+
+      return { provider };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.auditLog.record({
+        correlationId: request.correlationId,
+        actorType: 'user',
+        action: 'provider.configured',
+        outcome: 'failure',
+        details: { name: body.name, error: message },
+      });
+      throw new UltronError('provider_config_failed', message, 500);
+    }
+  });
+
+  app.delete('/api/v1/providers/config/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    await deps.providerConfigStore.remove(id);
+    deps.routingAdapters.delete(id);
+    deps.auditLog.record({
+      correlationId: request.correlationId,
+      actorType: 'user',
+      action: 'provider.removed',
+      outcome: 'success',
+      targetType: 'provider',
+      targetId: id,
+    });
+    return { removed: true };
   });
 
   app.get('/api/v1/models', async () => {

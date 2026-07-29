@@ -2,11 +2,25 @@ import { describe, expect, it, afterEach, vi } from 'vitest';
 import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
 import { EventBus } from '@ultron/event-bus';
 import { OpenClawAdapter } from '@ultron/openclaw-adapter';
-import type { RoutingEngine } from '@ultron/model-gateway';
+import type { RoutingEngine, ModelProviderAdapter } from '@ultron/model-gateway';
+import type { SecretStore } from '@ultron/security';
 import { createLogger } from './logger.js';
 import { EventStore } from './event-store.js';
 import { AuditLog } from './audit-log.js';
 import { buildServer } from './server.js';
+import { ProviderConfigStore } from './provider-config-store.js';
+
+/** SecretStore in-memory — nunca toca o keychain real do SO durante os testes. */
+function makeFakeSecretStore(): SecretStore {
+  const store = new Map<string, string>();
+  return {
+    set: vi.fn(async (ref: string, value: string) => {
+      store.set(ref, value);
+    }),
+    get: vi.fn(async (ref: string) => store.get(ref)),
+    delete: vi.fn(async (ref: string) => store.delete(ref)),
+  } as unknown as SecretStore;
+}
 
 function makeFakeRoutingEngine(overrides: Partial<RoutingEngine> = {}): RoutingEngine {
   return {
@@ -50,8 +64,11 @@ describe('control plane server', () => {
       { onDomainEvent: () => {} },
     );
     const routingEngine = makeFakeRoutingEngine();
+    const secretStore = makeFakeSecretStore();
+    const providerConfigStore = new ProviderConfigStore(db, secretStore);
+    const routingAdapters = new Map<string, ModelProviderAdapter>();
 
-    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter, routingEngine };
+    return { db, eventBus, eventStore, auditLog, logger, openClawAdapter, routingEngine, secretStore, providerConfigStore, routingAdapters };
   }
 
   async function buildTestServer(routingEngineOverrides: Partial<RoutingEngine> = {}) {
@@ -64,6 +81,8 @@ describe('control plane server', () => {
       auditLog: deps.auditLog,
       openClawAdapter: deps.openClawAdapter,
       routingEngine,
+      routingAdapters: deps.routingAdapters,
+      providerConfigStore: deps.providerConfigStore,
       dbFilePath: ':memory:',
       startedAt: new Date(),
     });
@@ -213,6 +232,53 @@ describe('control plane server', () => {
     expect(response.statusCode).toBe(503);
     expect(response.json().error.code).toBe('routing_failed');
     expect(auditLog.listRecent(10).some((e) => e.action === 'model.execute' && e.outcome === 'failure')).toBe(true);
+  });
+
+  it('POST /api/v1/providers/config persiste provider e registra secret_ref (nunca o segredo em texto plano)', async () => {
+    const { app, db, secretStore } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/providers/config',
+      payload: { name: 'Ollama Remoto', kind: 'api', baseUrl: 'https://ollama.alpha-comex.com/v1', apiKey: 'token-secreto-123' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.provider.id).toBe('ollama-remoto');
+    expect(body.provider.credentialRef).toBe('ultron:provider:ollama-remoto');
+
+    const row = db.prepare('SELECT * FROM providers WHERE id = ?').get('ollama-remoto') as Record<string, unknown>;
+    expect(JSON.stringify(row)).not.toContain('token-secreto-123');
+    expect(secretStore.set).toHaveBeenCalledWith('ultron:provider:ollama-remoto', 'token-secreto-123');
+  });
+
+  it('POST /api/v1/providers/config rejeita kind inválido com erro padronizado', async () => {
+    const { app } = await buildTestServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/providers/config',
+      payload: { name: 'X', kind: 'kind-invalido' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('invalid_request');
+  });
+
+  it('DELETE /api/v1/providers/config/:id remove o provider e o segredo', async () => {
+    const { app, secretStore } = await buildTestServer();
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/providers/config',
+      payload: { name: 'Temp', kind: 'api', baseUrl: 'https://x.com/v1', apiKey: 'abc' },
+    });
+
+    const response = await app.inject({ method: 'DELETE', url: '/api/v1/providers/config/temp' });
+
+    expect(response.statusCode).toBe(200);
+    expect(secretStore.delete).toHaveBeenCalledWith('ultron:provider:temp');
   });
 
   it('rota inexistente devolve envelope de erro padronizado com correlationId', async () => {

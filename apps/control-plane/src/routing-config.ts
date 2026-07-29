@@ -1,10 +1,12 @@
 import type { RoutingProfile } from '@ultron/contracts';
 
 /**
- * Perfis mínimos da Fase 4. Cada perfil prefere Ollama local por padrão
- * (único provider configurado até que credenciais de providers pagos sejam
- * fornecidas pelo usuário — Fase 5/onboarding). Sem fallback configurado
- * ainda, pois não há um segundo provider disponível nesta fase.
+ * Perfis default. "ollama" (local, sempre presente) é o fallback universal —
+ * funciona offline e sem credencial. "ollama-remoto" é um provider extra
+ * específico deste ambiente (configurado via POST /api/v1/providers/config
+ * pelo usuário, apontando para um Ollama remoto mais forte, modelos 30B-35B).
+ * Perfis que exigem mais qualidade preferem o remoto com fallback local;
+ * perfis que exigem privacidade/offline nunca saem do local.
  */
 export function defaultRoutingProfiles(): Map<string, RoutingProfile> {
   const profiles: RoutingProfile[] = [
@@ -27,10 +29,26 @@ export function defaultRoutingProfiles(): Map<string, RoutingProfile> {
     {
       id: 'coding',
       requiredCapabilities: ['text', 'tools'],
-      preferredProviders: ['ollama'],
+      preferredProviders: ['ollama-remoto'],
+      preferredModels: ['qwen3-coder:30b'],
+      fallbacks: ['ollama'],
+      preferLocal: false,
+    },
+    {
+      id: 'deep-reasoning',
+      requiredCapabilities: ['text'],
+      preferredProviders: ['ollama-remoto'],
+      preferredModels: ['qwen3.6:35b'],
+      fallbacks: ['ollama'],
+      preferLocal: false,
+    },
+    {
+      id: 'high-quality',
+      requiredCapabilities: ['text'],
+      preferredProviders: ['ollama-remoto'],
       preferredModels: [],
-      fallbacks: [],
-      preferLocal: true,
+      fallbacks: ['ollama'],
+      preferLocal: false,
     },
     {
       id: 'private-local',
