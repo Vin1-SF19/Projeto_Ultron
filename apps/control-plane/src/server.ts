@@ -8,6 +8,7 @@ import type { RoutingEngine, ModelProviderAdapter, ModelRunHandle } from '@ultro
 import { OpenAiCompatibleAdapter } from '@ultron/openai-compatible-adapter';
 import { autonomyLevelSchema, onboardingStepSchema, providerKindSchema, routingProfileIdSchema } from '@ultron/contracts';
 import type { Logger } from './logger.js';
+import { buildChatMessages } from './chat-messages.js';
 import type { EventStore } from './event-store.js';
 import type { AuditLog } from './audit-log.js';
 import type { ProviderConfigStore } from './provider-config-store.js';
@@ -361,7 +362,7 @@ export async function buildServer(deps: ServerDeps) {
     try {
       const response = await deps.routingEngine.execute({
         profileId: profileId.data,
-        messages: [{ role: 'user', content: body.message }],
+        messages: buildChatMessages(body.message),
       });
       deps.auditLog.record({
         correlationId: request.correlationId,
@@ -441,7 +442,7 @@ export async function buildServer(deps: ServerDeps) {
 
         void deps.routingEngine
           .stream(
-            { profileId: profileId.data, messages: [{ role: 'user', content: message.text }] },
+            { profileId: profileId.data, messages: buildChatMessages(message.text) },
             {
               onToken: (token) => {
                 socket.send(JSON.stringify({ kind: 'model_stream_token', requestId, token }));
