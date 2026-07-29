@@ -9,7 +9,7 @@ Baseado nas 20 fases definidas em [prompt_Inicial.md](../../prompt_Inicial.md), 
 | 2 | Control Plane e Event Bus | **Concluída** |
 | 3 | OpenClaw Adapter | **Concluída** |
 | 4 | Providers, modelos e router | **Concluída** (OpenAI/Claude/Codex pendentes de credencial do usuário) |
-| 5 | Onboarding e segredos | **Em andamento** |
+| 5 | Onboarding e segredos | **Parcialmente concluída** — keychain e configuração de modelos prontos; onboarding com UI, seleção de pasta de projeto e permissões ainda pendentes |
 | 6 | Home, chat e rosto | Não iniciada |
 | 7 | Voz | Não iniciada |
 | 8 | Fila persistente | Não iniciada |
