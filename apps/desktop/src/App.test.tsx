@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App.js';
 
+class FakeWebSocket {
+  addEventListener() {}
+  send() {}
+  close() {}
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -21,7 +27,8 @@ describe('App', () => {
     expect(screen.getByText(/Não disponível nesta versão/)).toBeDefined();
   });
 
-  it('mostra status real quando o Control Plane responde', async () => {
+  it('mostra a Home (rosto, chat e navegação) quando conectado e onboarding concluído', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
     vi.stubGlobal(
       'fetch',
       vi.fn().mockImplementation((url: string) => {
@@ -75,9 +82,9 @@ describe('App', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByText('conectado')).toBeDefined());
-    expect(screen.getByText('0.1.0')).toBeDefined();
-    expect(screen.getByText('CPU de teste (8 núcleos)')).toBeDefined();
+    await waitFor(() => expect(screen.getByRole('img', { name: /rosto do ultron/i })).toBeDefined());
+    expect(screen.getByRole('navigation', { name: /navegação principal/i })).toBeDefined();
+    expect(screen.getByLabelText('Mensagem para o Ultron')).toBeDefined();
   });
 
   it('mostra o onboarding quando ainda não foi concluído', async () => {

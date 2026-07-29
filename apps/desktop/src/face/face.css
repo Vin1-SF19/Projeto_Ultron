@@ -1,0 +1,232 @@
+.ultron-face {
+  --face-accent: #3ba7ff;
+  --face-core: #eaf6ff;
+  --face-ring: #1c3a52;
+  --face-bg: #0b1622;
+
+  position: relative;
+  width: min(280px, 60vw);
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+
+.ultron-face__svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ultron-face__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.ultron-face__ring {
+  fill: none;
+  stroke: var(--face-ring);
+  stroke-width: 2;
+}
+
+.ultron-face__ring--inner {
+  stroke: var(--face-accent);
+  stroke-opacity: 0.35;
+}
+
+.ultron-face__core {
+  fill: var(--face-accent);
+  filter: drop-shadow(0 0 6px var(--face-accent));
+}
+
+.ultron-face__eye {
+  fill: var(--face-core);
+  transform-origin: center;
+  transition: fill 200ms ease, transform 200ms ease, rx 200ms ease, ry 200ms ease;
+}
+
+.ultron-face__eye--blink {
+  transform: scaleY(0.05);
+}
+
+.ultron-face__mouth {
+  fill: none;
+  stroke: var(--face-core);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: d 200ms ease, stroke 200ms ease;
+}
+
+/* Respiração sutil: escala inteira do rosto, contínua no estado idle/listening/thinking. */
+.ultron-face--anim-full.ultron-face--idle .ultron-face__svg,
+.ultron-face--anim-full.ultron-face--listening .ultron-face__svg,
+.ultron-face--anim-full.ultron-face--thinking .ultron-face__svg,
+.ultron-face--anim-full.ultron-face--awaiting_approval .ultron-face__svg {
+  animation: ultron-face-breathe 4.5s ease-in-out infinite;
+}
+
+@keyframes ultron-face-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+}
+
+/* thinking: anel interno gira lentamente */
+.ultron-face--anim-full.ultron-face--thinking .ultron-face__ring--inner {
+  animation: ultron-face-spin 3s linear infinite;
+  transform-origin: 100px 100px;
+}
+
+@keyframes ultron-face-spin {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -486; }
+}
+
+.ultron-face--thinking .ultron-face__ring--inner {
+  stroke-dasharray: 12 8;
+}
+
+/* speaking: boca abre/fecha, núcleo pulsa em ritmo mais rápido (acionado por token real, não decorativo) */
+.ultron-face--speaking .ultron-face__mouth {
+  d: path('M 76 126 Q 100 142 124 126');
+}
+
+.ultron-face--anim-full.ultron-face--speaking .ultron-face__core {
+  animation: ultron-face-pulse 480ms ease-in-out infinite;
+}
+
+@keyframes ultron-face-pulse {
+  0%, 100% { r: 10; }
+  50% { r: 13; }
+}
+
+/* working: núcleo e anel externo em amarelo/laranja suave, rotação constante */
+.ultron-face--working {
+  --face-accent: #f5a623;
+}
+
+.ultron-face--anim-full.ultron-face--working .ultron-face__ring--outer {
+  animation: ultron-face-spin 6s linear infinite;
+  transform-origin: 100px 100px;
+  stroke-dasharray: 40 20;
+}
+
+/* success */
+.ultron-face--success {
+  --face-accent: #35c76e;
+}
+
+.ultron-face--success .ultron-face__mouth {
+  d: path('M 76 124 Q 100 140 124 124');
+}
+
+/* warning */
+.ultron-face--warning {
+  --face-accent: #f5a623;
+}
+
+.ultron-face--warning .ultron-face__eye {
+  ry: 10;
+}
+
+/* error */
+.ultron-face--error {
+  --face-accent: #e5484d;
+}
+
+.ultron-face--error .ultron-face__mouth {
+  d: path('M 78 132 Q 100 120 122 132');
+}
+
+.ultron-face--error .ultron-face__eye {
+  ry: 8;
+}
+
+/* offline: dessaturado, sem brilho */
+.ultron-face--offline {
+  --face-accent: #4a5568;
+  filter: grayscale(0.6);
+  opacity: 0.6;
+}
+
+.ultron-face--offline .ultron-face__mouth {
+  d: path('M 80 128 L 120 128');
+}
+
+/* sleeping: olhos fechados, tudo mais lento e escuro */
+.ultron-face--sleeping {
+  --face-accent: #2d3f52;
+  opacity: 0.75;
+}
+
+.ultron-face--sleeping .ultron-face__eye {
+  ry: 1.5;
+}
+
+.ultron-face--anim-full.ultron-face--sleeping .ultron-face__svg {
+  animation: ultron-face-breathe 6s ease-in-out infinite;
+}
+
+/* privacy: rosto "velado" — indica que o Ultron não está processando/observando */
+.ultron-face--privacy {
+  --face-accent: #8a5cf6;
+}
+
+.ultron-face--privacy .ultron-face__ring--inner {
+  stroke-dasharray: 4 6;
+}
+
+/* awaiting_approval: pulsar de alerta suave no anel externo */
+.ultron-face--awaiting_approval {
+  --face-accent: #f5c542;
+}
+
+.ultron-face--anim-full.ultron-face--awaiting_approval .ultron-face__ring--outer {
+  animation: ultron-face-alert-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ultron-face-alert-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.35; }
+}
+
+/* interrupted */
+.ultron-face--interrupted {
+  --face-accent: #e5484d;
+}
+
+.ultron-face--interrupted .ultron-face__mouth {
+  d: path('M 82 128 L 118 128 M 82 128 L 118 128');
+}
+
+/* listening/hearing: olhos levemente maiores, atentos */
+.ultron-face--listening .ultron-face__eye,
+.ultron-face--hearing .ultron-face__eye {
+  ry: 17;
+}
+
+.ultron-face--anim-full.ultron-face--hearing .ultron-face__core {
+  animation: ultron-face-pulse 700ms ease-in-out infinite;
+}
+
+/* Modo sem animação (explícito pelo usuário) ou reduced: nenhuma keyframe roda. */
+.ultron-face--anim-none .ultron-face__svg,
+.ultron-face--anim-none .ultron-face__ring--outer,
+.ultron-face--anim-none .ultron-face__ring--inner,
+.ultron-face--anim-none .ultron-face__core {
+  animation: none !important;
+}
+
+.ultron-face--anim-reduced .ultron-face__svg {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ultron-face__svg,
+  .ultron-face__ring--outer,
+  .ultron-face__ring--inner,
+  .ultron-face__core {
+    animation: none !important;
+  }
+}

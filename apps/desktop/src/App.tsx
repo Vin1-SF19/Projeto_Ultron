@@ -7,8 +7,8 @@ import {
   type SystemCapabilities,
   type SystemStatus,
 } from './control-plane-client.js';
-import { ProjectsPanel } from './ProjectsPanel.js';
 import { Onboarding } from './Onboarding.js';
+import { Home } from './home/Home.js';
 
 type ConnectionState = 'loading' | 'connected' | 'error';
 
@@ -54,6 +54,10 @@ export function App() {
 
   if (state === 'connected' && onboardingDone === false) {
     return <Onboarding onFinished={() => setOnboardingDone(true)} />;
+  }
+
+  if (state === 'connected' && onboardingDone === true) {
+    return <Home />;
   }
 
   return (
@@ -125,7 +129,6 @@ export function App() {
         </div>
       )}
 
-      {state === 'connected' && <ProjectsPanel />}
     </div>
   );
 }
