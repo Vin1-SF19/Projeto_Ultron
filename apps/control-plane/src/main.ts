@@ -1,9 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { openDatabase, runMigrations, allMigrations } from '@ultron/database';
+import { EventBus } from '@ultron/event-bus';
 import { createLogger } from './logger.js';
 import { EventStore } from './event-store.js';
+import { AuditLog } from './audit-log.js';
 import { buildServer } from './server.js';
 
 const DATA_DIR = path.join(os.homedir(), '.ultron');
@@ -20,9 +23,13 @@ async function main() {
   const migrationResult = runMigrations(db, allMigrations);
   logger.info({ applied: migrationResult.applied }, 'migrations aplicadas');
 
-  const eventStore = new EventStore(db);
+  const eventBus = new EventBus((error, event) => {
+    logger.error({ err: error, eventType: event.type }, 'assinante do event bus falhou');
+  });
+  const eventStore = new EventStore(db, eventBus);
+  const auditLog = new AuditLog(db);
 
-  const app = await buildServer({ logger, eventStore, dbFilePath: DB_FILE_PATH, startedAt });
+  const app = await buildServer({ logger, eventStore, eventBus, auditLog, dbFilePath: DB_FILE_PATH, startedAt });
 
   eventStore.append({
     type: 'system.started',
@@ -30,6 +37,13 @@ async function main() {
     aggregateId: 'ultron-control-plane',
     source: { module: 'control-plane' },
     payload: { pid: process.pid, port: PORT },
+  });
+  auditLog.record({
+    correlationId: randomUUID(),
+    actorType: 'system',
+    action: 'control_plane.started',
+    outcome: 'success',
+    details: { pid: process.pid, port: PORT },
   });
 
   const shutdown = async (signal: string) => {
@@ -40,6 +54,13 @@ async function main() {
       aggregateId: 'ultron-control-plane',
       source: { module: 'control-plane' },
       payload: { signal },
+    });
+    auditLog.record({
+      correlationId: randomUUID(),
+      actorType: 'system',
+      action: 'control_plane.stopped',
+      outcome: 'success',
+      details: { signal },
     });
     await app.close();
     db.close();
