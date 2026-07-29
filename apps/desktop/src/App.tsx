@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
   fetchHealth,
+  fetchOnboardingProgress,
   fetchSystemCapabilities,
   fetchSystemStatus,
   type SystemCapabilities,
   type SystemStatus,
 } from './control-plane-client.js';
+import { ProjectsPanel } from './ProjectsPanel.js';
+import { Onboarding } from './Onboarding.js';
 
 type ConnectionState = 'loading' | 'connected' | 'error';
 
@@ -18,6 +21,7 @@ export function App() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [capabilities, setCapabilities] = useState<SystemCapabilities | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,13 +29,15 @@ export function App() {
     async function load() {
       try {
         await fetchHealth();
-        const [systemStatus, systemCapabilities] = await Promise.all([
+        const [systemStatus, systemCapabilities, onboarding] = await Promise.all([
           fetchSystemStatus(),
           fetchSystemCapabilities(),
+          fetchOnboardingProgress(),
         ]);
         if (cancelled) return;
         setStatus(systemStatus);
         setCapabilities(systemCapabilities);
+        setOnboardingDone(onboarding.currentStep === 'done');
         setState('connected');
       } catch (err) {
         if (cancelled) return;
@@ -45,6 +51,10 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  if (state === 'connected' && onboardingDone === false) {
+    return <Onboarding onFinished={() => setOnboardingDone(true)} />;
+  }
 
   return (
     <div className="status-page">
@@ -114,6 +124,8 @@ export function App() {
           </div>
         </div>
       )}
+
+      {state === 'connected' && <ProjectsPanel />}
     </div>
   );
 }
