@@ -4,10 +4,10 @@ Baseado nas 20 fases definidas em [prompt_Inicial.md](../../prompt_Inicial.md), 
 
 | Fase | Nome | Status |
 |---|---|---|
-| 0 | Auditoria, pesquisa e arquitetura | **Em andamento** |
-| 1 | Fundação do monorepo | Não iniciada |
-| 2 | Control Plane e Event Bus | Não iniciada |
-| 3 | OpenClaw Adapter | Não iniciada |
+| 0 | Auditoria, pesquisa e arquitetura | **Concluída** |
+| 1 | Fundação do monorepo | **Concluída** |
+| 2 | Control Plane e Event Bus | **Concluída** |
+| 3 | OpenClaw Adapter | **Em andamento** |
 | 4 | Providers, modelos e router | Não iniciada |
 | 5 | Onboarding e segredos | Não iniciada |
 | 6 | Home, chat e rosto | Não iniciada |

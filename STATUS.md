@@ -8,102 +8,103 @@
 
 ## 1. O QUE É ESTE PROJETO
 
-Superassistente pessoal/profissional local-first ("Projeto Ultron"), especificado em [prompt_Inicial.md](prompt_Inicial.md) (4313 linhas). Ver seção 1 da versão anterior deste arquivo (git log) para o resumo completo da visão de produto, ou o próprio `prompt_Inicial.md`.
+Superassistente pessoal/profissional local-first ("Projeto Ultron"), especificado em [prompt_Inicial.md](prompt_Inicial.md) (4313 linhas).
 
 Resumo rápido: monólito modular local (Tauri 2 + React no desktop, Control Plane em Node + Fastify + WebSocket + SQLite), com adapters para OpenClaw, Ollama, Claude Code, Codex, routers de modelo, ElevenLabs, Gmail, Calendar, WhatsApp, GitHub. 20 fases de implementação.
+
+Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branch `master` = trabalho já revisado/estável; branch `develop` criada para integração; branches `phase/NN-nome` por fase, conforme seção 55 do prompt mestre).
 
 ---
 
 ## 2. ONDE PARAMOS (ESTADO ATUAL)
 
 **FASE 0 (Auditoria) — CONCLUÍDA.**
-**FASE 1 (Fundação do monorepo) — CONCLUÍDA.** Todos os critérios de aceite validados de ponta a ponta com comandos reais (não presumidos).
+**FASE 1 (Fundação do monorepo) — CONCLUÍDA.** Commitada e enviada ao GitHub (`master`, commit `916f904`).
+**FASE 2 (Control Plane e Event Bus) — CONCLUÍDA.** Ainda não commitada (ver seção 8 — próximo passo).
 
-Próxima fase a iniciar: **FASE 2 — Control Plane e Event Bus** (aprofundar o que já existe: Fastify, WebSocket, Event Store, Event Bus, health checks mais completos, auditoria, erros padronizados, correlation IDs — ver seção 51 do prompt mestre).
+Branch de trabalho atual: `phase/02-control-plane` (criada a partir de `develop`, que foi criada a partir de `master`).
 
-### Checklist Fase 0
-- [x] `prompt_Inicial.md` lido na íntegra.
-- [x] Diagnóstico do ambiente local.
-- [x] Auditoria dos 6 projetos de referência + 4 docs oficiais — [docs/research/UPSTREAM_AUDIT.md](docs/research/UPSTREAM_AUDIT.md).
-- [x] Matriz build vs reuse, arquitetura inicial, roadmap — [docs/architecture/](docs/architecture/), [docs/product/ROADMAP.md](docs/product/ROADMAP.md).
-- [x] Threat model inicial — [docs/security/THREAT_MODEL.md](docs/security/THREAT_MODEL.md).
-- [x] ADR-001 a ADR-004.
-- [x] Checkpoint com usuário — aprovado avançar para Fase 1.
+Próxima fase a iniciar: **FASE 3 — OpenClaw Adapter** (descoberta do Gateway local, WebSocket/RPC, autenticação, health, reconexão, mapeamento de eventos, camada anticorrupção — ver ADR-003 e seção 51 do prompt mestre).
 
-### Checklist Fase 1
-- [x] `git init` executado.
-- [x] Estrutura completa do monorepo criada (`apps/`, `packages/*` com 24 subpastas de adapters/módulos, `upstream/`, `docs/`, `scripts/`, `fixtures/`, `tests/`, `.github/workflows/`).
-- [x] Arquivos raiz: `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE` (MIT), `AGENTS.md`, `.gitignore`, `.prettierrc.json`, `eslint.config.js`.
-- [x] `packages/contracts` — envelope `DomainEvent` (Zod + TS), testado.
-- [x] `packages/database` — driver SQLite via `node:sqlite` nativo (ver ADR-005), migrator idempotente, migration `001_event_store`, testado.
-- [x] `apps/control-plane` — Fastify + WebSocket (`/ws`), Event Store persistente, endpoints `/health`, `/api/v1/system/status`, `/api/v1/system/capabilities`, logger Pino com redaction de segredos, detecção real de ambiente (CPU/RAM/SO/Node), shutdown gracioso em SIGINT/SIGTERM. Testado com `vitest` (3 testes) e validado rodando o binário compilado (`node dist/main.js`) de verdade — banco SQLite real criado em `~/.ultron/`.
-- [x] `apps/desktop` — Tauri 2 + React 19 + Vite 6 + TypeScript. Tela de diagnóstico consumindo o Control Plane real via `fetch` (sem nenhum dado mockado — mostra "Não disponível nesta versão" se desconectado, conforme seção 9.2 do prompt mestre). Testado com `vitest`/`@testing-library/react` (2 testes) e **compilado e executado de verdade** (`ultron-desktop.exe`), confirmando via log do Control Plane que o app real fez as chamadas HTTP e recebeu os dados.
-- [x] CI básico (`.github/workflows/ci.yml`) rodando em `windows-latest`: install, lint, typecheck, build, test.
-- [x] `pnpm install`, `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm typecheck` — todos validados do zero, 100% verdes (10 testes passando, zero erros).
-- [x] ADR-005 (driver SQLite: `node:sqlite` em vez de `better-sqlite3`) e ADR-006 (toolchain nativo Windows: Rust + Visual Studio Build Tools) registrados após obstáculos reais encontrados e resolvidos durante a implementação.
+### Checklist Fase 2 (concluída nesta sessão)
+- [x] `packages/event-bus` criado — EventBus in-process pub/sub, com suporte a filtro por tipo exato ou prefixo wildcard (`system.*`), e handler de erro por assinante que **nunca deixa um listener quebrado derrubar os demais nem quem publicou** (testado).
+- [x] `EventStore` do control-plane refatorado para depender do `EventBus` (recebe por injeção), preservando a garantia "grava antes de publicar" (um assinante nunca vê um evento que não sobreviveria a um reinício).
+- [x] `EventStore.listSince(cursor)` — replay incremental por cursor (usa `rowid` como critério de ordenação monotônica), testado.
+- [x] `AuditLog` (`apps/control-plane/src/audit-log.ts`) — tabela `audit_events` (migration `002_audit_events`), distinta da tabela `events` de domínio. Campos: `actor_type` (user/agent/system), `actor_id`, `action`, `outcome` (success/failure), `target_type`/`target_id`, `details`. Endpoint `GET /api/v1/audit`.
+- [x] Erros padronizados: `UltronError` (código + statusCode + details) e envelope JSON consistente `{ error: { code, message, correlationId, details } }` para todo erro HTTP, incluindo 404 (`setNotFoundHandler`) e 500 não tratado — nunca mensagem genérica "Algo deu errado".
+- [x] Correlation ID de ponta a ponta: hook `onRequest` gera ou reaproveita `x-correlation-id` (header), devolvido em toda resposta; usado nos logs estruturados e nas entradas de auditoria.
+- [x] WebSocket (`/ws`) agora aceita mensagem `{ kind: "replay_since", cursor }` do cliente para replay incremental, além do replay dos últimos 50 eventos na conexão inicial. Erros de envio ao socket são capturados e logados, não derrubam a conexão.
+- [x] Testes de reinício: `event-store.test.ts` reabre o **mesmo arquivo SQLite** (não `:memory:`) em um diretório temporário, simulando fechar e reabrir o processo, confirmando que eventos persistem.
+- [x] Teste de falha: listener do EventBus que lança erro proposital — confirmado que não impede gravação nem os demais assinantes.
+- [x] Validado de ponta a ponta com o binário compilado real (`node dist/main.js`): correlation ID customizado no header, 404 com envelope padronizado, `/api/v1/audit` retornando o evento real `control_plane.started`.
+- [x] `pnpm install`, `pnpm build`, `pnpm test` (25 testes, 5 pacotes), `pnpm lint`, `pnpm typecheck` — todos 100% verdes do zero.
 
-## 3. AMBIENTE LOCAL — ESTADO ATUALIZADO
+## 3. AMBIENTE LOCAL
 
-Desde o diagnóstico inicial da Fase 0, o ambiente mudou (com aprovação do usuário):
-
-| Item | Estado |
-|---|---|
-| Rust/Cargo | **Instalado** via rustup (winget `Rustlang.Rustup`) — rustc 1.97.1, cargo 1.97.1, target `x86_64-pc-windows-msvc` |
-| Visual Studio Build Tools 2022 | **Instalado** via winget (`Microsoft.VisualStudio.2022.BuildTools`) com workload `Microsoft.VisualStudio.Workload.VCTools` — necessário para linkar binários Rust/Tauri no Windows |
-| `node:sqlite` | Usado como driver SQLite nativo (zero dependência de compilação) — ver [ADR-005](docs/adr/ADR-005-database.md) |
-| WSL2, Ollama, OpenClaw, Codex CLI | Ainda não instalados (não necessários até fases posteriores) |
-
-Demais itens inalterados desde a Fase 0 (ver histórico no git ou `docs/`).
+Sem mudanças desde o fim da Fase 1. Rust/Cargo e Visual Studio Build Tools já instalados (ver ADR-006). `node:sqlite` nativo em uso (ADR-005).
 
 ## 4. DECISÕES TOMADAS (ADRs)
 
-1. ADR-001 — Monólito modular local.
-2. ADR-002 — Node.js como runtime do Control Plane (não Bun).
-3. ADR-003 — OpenClaw como serviço externo gerenciado via adapter.
-4. ADR-004 — Router de modelos: `claude-code-router` primeiro, `OmniRoute` depois.
-5. ADR-005 — `node:sqlite` nativo em vez de `better-sqlite3` (obstáculo real: falta de prebuilt binary + falta de VS Build Tools no momento).
-6. ADR-006 — Instalação de Rust + Visual Studio Build Tools no Windows para viabilizar compilação do Tauri (aprovado explicitamente pelo usuário).
+ADR-001 a ADR-006 — ver [docs/adr/](docs/adr/). Nenhum ADR novo foi necessário na Fase 2 (implementação dentro do que já estava decidido; nenhuma escolha arquitetural nova relevante o suficiente para justificar um ADR).
 
-## 5. OBSTÁCULOS REAIS ENCONTRADOS E RESOLVIDOS NA FASE 1 (para não repetir a investigação)
+## 5. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
 
-- **`better-sqlite3` falhou ao compilar** (sem prebuilt binary para Node 24.16/Windows x64, sem Visual Studio Build Tools instalado) → resolvido trocando para `node:sqlite` nativo (ADR-005).
-- **Vite 5.4.21 não reconhece `node:sqlite`** como builtin (não está em `node:module.builtinModules`, só detectável via `isBuiltin('node:sqlite')`) → resolvido usando `createRequire(import.meta.url)('node:sqlite')` em vez de `import ... from 'node:sqlite'`, e evitando qualquer `export ... from 'node:sqlite'` (mesmo `export type`) no código-fonte. Ver [packages/database/src/connection.ts](packages/database/src/connection.ts).
-- **Rust não linkava** (`link.exe` errado sendo resolvido do Git for Windows, faltava MSVC linker) → resolvido instalando Visual Studio Build Tools com workload C++ (ADR-006, aprovado pelo usuário).
-- **`pino-pretty` ausente** quebrava os testes do control-plane (`unable to determine transport target`) → resolvido adicionando `pino-pretty` como devDependency explícita do pacote.
-- **`eslint.config.js` referenciava `@eslint/js` e `typescript-eslint`** sem declará-los como dependências → resolvido adicionando ambos ao `package.json` raiz.
-- **`tauri.conf.json` usava `pnpm --dir .. exec vite`**, que falha em contexto de workspace pnpm (`ERR_PNPM_RECURSIVE_EXEC_NO_PACKAGE`) → resolvido trocando para `pnpm --filter @ultron/desktop exec vite`.
-- **`packages/contracts` e `packages/database` não tinham script `build`** (apontavam `main`/`types` para `src/*.ts`) → quebraria em produção real (`node dist/main.js` não executa `.ts`). Resolvido adicionando `build` (tsc) e apontando `main`/`types` para `dist/`.
+```text
+packages/
+  contracts/        DomainEvent (Zod + TS)
+  database/         node:sqlite, migrator, migrations 001 (events) e 002 (audit_events)
+  event-bus/        EventBus in-process pub/sub — NOVO na Fase 2
 
-## 6. INCIDENTE OPERACIONAL A REGISTRAR
+apps/control-plane/src/
+  main.ts           bootstrap: abre DB, roda migrations, cria EventBus/EventStore/AuditLog, sobe Fastify
+  server.ts         Fastify + WebSocket + correlation ID hook + error handler padronizado — atualizado na Fase 2
+  event-store.ts    grava evento no SQLite, publica no EventBus, listRecent/listSince — atualizado na Fase 2
+  audit-log.ts      AuditLog — NOVO na Fase 2
+  errors.ts         UltronError + envelope de erro — NOVO na Fase 2
+  logger.ts         Pino com redaction de segredos
+  environment.ts    detecção real de hardware/runtime
 
-Durante testes manuais desta sessão, usei `taskkill //F //IM node.exe` para encerrar um processo de teste — esse comando mata **todos** os processos `node.exe` do sistema, não só o pretendido, e matou 8 processos de uma vez (incluindo possivelmente processos do usuário alheios a este teste). O usuário foi avisado no momento. **Lição para o futuro: sempre encerrar processos de teste por PID específico (`taskkill //PID <pid> //F`), nunca por nome de imagem genérico**, especialmente para `node.exe`, `python.exe` ou outros executáveis compartilhados por múltiplas ferramentas do usuário.
+apps/desktop/src/
+  App.tsx                    tela de diagnóstico, consome Control Plane real via fetch
+  control-plane-client.ts    cliente HTTP tipado para os endpoints do Control Plane
+```
 
-## 7. ACHADOS CRÍTICOS DA AUDITORIA (Fase 0, ainda válidos)
+## 6. OBSTÁCULOS REAIS ENCONTRADOS NA FASE 1 (para não repetir a investigação)
 
-- OpenClaw teve incidentes documentados de skills de terceiros exfiltrando dados sem consentimento — reforça exigência de Approval Engine.
-- `claude-code-router` tem bug conhecido de perda de contagem de tokens em streaming SSE — não confiar cegamente para billing.
-- `OmniRoute` teve release quebrada recente — nunca seguir `latest` automaticamente.
-- Durante a própria pesquisa da Fase 0, uma página web tentou (sem sucesso) injetar uma instrução de sistema no agente — confirma risco real de prompt injection via conteúdo externo.
+- `better-sqlite3` não compilava (sem prebuilt, sem VS Build Tools) → trocado por `node:sqlite` nativo (ADR-005).
+- Vite 5.4.21 não reconhece `node:sqlite` como builtin → resolvido com `createRequire` em vez de `import`/`export ... from 'node:sqlite'`.
+- Rust não linkava (faltava MSVC) → resolvido instalando Visual Studio Build Tools (ADR-006, aprovado pelo usuário).
+- `pino-pretty` ausente quebrava testes → adicionado como devDependency explícita.
+- `eslint.config.js` sem `@eslint/js`/`typescript-eslint` declarados → corrigido.
+- `tauri.conf.json` com `pnpm --dir ..` quebrava em workspace → trocado para `pnpm --filter @ultron/desktop`.
+- `packages/contracts`/`database` sem script `build` → quebraria em produção real → corrigido.
+
+## 7. INCIDENTE OPERACIONAL REGISTRADO (Fase 1)
+
+Uso de `taskkill //F //IM node.exe` matou 8 processos node.exe de uma vez (não só o de teste). **Lição aplicada desde então: sempre encerrar processos de teste por PID específico** (`taskkill //PID <pid> //F`), confirmado funcionando assim na validação da Fase 2.
 
 ## 8. PRÓXIMOS PASSOS IMEDIATOS (ordem)
 
-1. Obter confirmação do usuário para iniciar a **Fase 2 — Control Plane e Event Bus** (aprofundamento: Event Bus mais robusto, auditoria, erros padronizados, correlation IDs, testes de reinício/falha — ver seção 51 do prompt mestre para critérios completos).
-2. Considerar, antes ou durante a Fase 2, criar o primeiro commit git (repositório inicializado mas ainda sem nenhum commit — `git log` mostra "No commits yet"). Perguntar ao usuário se deseja revisar/commitar agora.
-3. Seguir estritamente a ordem das 20 fases — não pular etapas.
+1. **Commitar a Fase 2** na branch `phase/02-control-plane` (commits pequenos por escopo, conforme seção 55 do prompt mestre: ex. `feat(event-bus): add in-process pub/sub`, `feat(control-plane): add audit log and standardized errors`, `feat(control-plane): add correlation id propagation`, `test(control-plane): cover restart and failure scenarios`). Depois merge em `develop` e push.
+2. Perguntar ao usuário se deseja abrir PR de `phase/02-control-plane` → `develop`, ou seguir direto.
+3. Iniciar **Fase 3 — OpenClaw Adapter**: descoberta do Gateway local, autenticação, WebSocket, RPC, health, reconexão, mapeamento de eventos, tela de status, suporte a local/WSL/remoto. Antes de codificar, reconfirmar no [UPSTREAM_AUDIT.md](docs/research/UPSTREAM_AUDIT.md) e [ADR-003](docs/adr/ADR-003-openclaw-integration.md) a estratégia já decidida.
+4. Seguir estritamente a ordem das 20 fases — não pular etapas.
 
 ## 9. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
 
-- Nunca instalar WSL, Docker, Ollama, OpenClaw, Rust, Visual Studio Build Tools ou qualquer componente sem antes mostrar o que será feito e obter confirmação explícita (mesmo que já tenha sido aprovado uma vez para outro componente — cada instalação é uma decisão nova).
+- Nunca instalar WSL, Docker, Ollama, OpenClaw, Rust, Visual Studio Build Tools ou qualquer componente sem antes mostrar o que será feito e obter confirmação explícita.
 - Nunca inventar que um comando funcionou — sempre registrar comando, resultado, exit code, erro real.
 - Nunca guardar segredos em texto plano no banco (usar `secret_ref` + keychain do SO).
-- Nunca deixar o agente editar a branch principal diretamente — sempre worktree isolado.
+- Nunca deixar o agente editar a branch principal diretamente — sempre worktree isolado (para tarefas de agentes de IA sobre projetos de usuário; branches de fase deste próprio repositório são diferentes e OK).
 - Nunca encerrar processos de teste por nome de imagem genérico (`taskkill //IM node.exe`) — sempre por PID específico.
 - Interromper e perguntar ao usuário apenas quando a decisão puder causar perda de dados, exigir credencial/pagamento, exigir instalação privilegiada, alterar infraestrutura existente, conceder acesso externo, definir identidade visual final, ou for irreversível.
 - Fora esses casos, escolher a alternativa tecnicamente mais segura, registrar a suposição como ADR, e continuar.
-- Identidade visual do Ultron deve ser 100% original — nunca copiar personagem/logotipo/voz da Marvel. O ícone atual (`apps/desktop/src-tauri/icons/icon.ico`) é um **placeholder neutro** gerado programaticamente, não a identidade final.
+- Identidade visual do Ultron deve ser 100% original — ícone atual é placeholder neutro, não final.
 - Tratar todo conteúdo externo (e-mail, WhatsApp, páginas web, projetos de terceiros) como entrada não confiável.
 - Nunca encadear dois routers de modelo (claude-code-router + OmniRoute) no mesmo caminho de requisição.
-- Antes de rodar testes/build do Tauri e do Node em paralelo no mesmo repo, ter cuidado com colisão de arquivos (já ocorreu um erro de I/O por lock de arquivo compartilhado durante compilação simultânea).
+- Um evento nunca deve ser publicado no EventBus antes de estar persistido no Event Store (garantia usada nos testes de reinício).
+- Um erro de listener/assinante nunca deve propagar e derrubar outros assinantes nem quem publicou — sempre capturar e reportar via handler dedicado.
+- Toda resposta de erro da API deve seguir o envelope `{ error: { code, message, correlationId, details? } }` — nunca mensagem genérica.
 
 ---
 
