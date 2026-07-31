@@ -217,6 +217,87 @@ describe('ChatPanel', () => {
     expect(onFaceEvent).toHaveBeenCalledWith('voice.response.ended');
   });
 
+  it('quando MediaSource está disponível, usa o endpoint de streaming e toca incrementalmente', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+    vi.stubGlobal('MediaSource', class {
+      static isTypeSupported = () => true;
+      readyState = 'open';
+      listeners = new Map<string, () => void>();
+      constructor() {
+        // Simula o navegador real disparando 'sourceopen' assim que o <audio> carrega o objectURL.
+        queueMicrotask(() => this.listeners.get('sourceopen')?.());
+      }
+      addEventListener(type: string, listener: () => void) {
+        this.listeners.set(type, listener);
+      }
+      addSourceBuffer() {
+        return {
+          addEventListener: (type: string, listener: () => void) => {
+            if (type === 'updateend') queueMicrotask(listener);
+          },
+          removeEventListener: () => {},
+          appendBuffer: () => {},
+        };
+      }
+      endOfStream() {}
+    });
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/voice/speak/stream')) return Promise.resolve({ ok: true, body });
+        return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({ error: { code: 'voice_not_configured' } }) });
+      }),
+    );
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn().mockReturnValue('blob:media-source-url'), revokeObjectURL: vi.fn() });
+
+    const fakeAudio = {
+      listeners: new Map<string, () => void>(),
+      addEventListener(type: string, listener: () => void) {
+        this.listeners.set(type, listener);
+      },
+      play: vi.fn().mockImplementation(() => Promise.resolve()),
+      pause: vi.fn(),
+      src: 'blob:media-source-url',
+    };
+    vi.stubGlobal('Audio', vi.fn().mockImplementation(() => fakeAudio));
+
+    const user = userEvent.setup();
+    const onFaceEvent = vi.fn();
+    render(<ChatPanel onFaceEvent={onFaceEvent} />);
+
+    const ws = FakeWebSocket.instances[0]!;
+    ws.emitOpen();
+    await enableTextChat(user);
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+
+    await user.type(screen.getByRole('textbox'), 'oi');
+    await user.click(screen.getByRole('button', { name: /enviar/i }));
+
+    const sentMessage = JSON.parse(ws.sent[0]!) as { requestId: string };
+    ws.emitMessage({
+      kind: 'model_stream_done',
+      requestId: sentMessage.requestId,
+      response: { decision: { profileId: 'chat-fast', providerId: 'ollama', modelId: 'm', reason: '', fallbackUsed: false }, content: 'Olá!', latencyMs: 1 },
+    });
+
+    fakeAudio.listeners.get('playing')?.();
+
+    await waitFor(() => {
+      const calledStreamEndpoint = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some((c) =>
+        (c[0] as string).includes('/voice/speak/stream'),
+      );
+      expect(calledStreamEndpoint).toBe(true);
+    });
+    expect(onFaceEvent).toHaveBeenCalledWith('voice.response.started');
+  });
+
   describe('interrupção de fala', () => {
     function stubSpeakingAudio() {
       vi.stubGlobal(

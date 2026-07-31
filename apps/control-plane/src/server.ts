@@ -494,21 +494,34 @@ export async function buildServer(deps: ServerDeps) {
       let audioBytes = 0;
       const countingStream = new ReadableStream<Uint8Array>({
         async start(controller) {
-          const reader = stream.getReader();
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            audioBytes += value.length;
-            controller.enqueue(value);
+          try {
+            const reader = stream.getReader();
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              audioBytes += value.length;
+              controller.enqueue(value);
+            }
+            controller.close();
+            deps.auditLog.record({
+              correlationId: request.correlationId,
+              actorType: 'user',
+              action: 'voice.spoken',
+              outcome: 'success',
+              details: { characters: body.text!.length, audioBytes, voiceId: voiceConfig.voiceId, streamed: true },
+            });
+          } catch (streamError) {
+            const message = streamError instanceof Error ? streamError.message : String(streamError);
+            deps.logger.error({ err: streamError, correlationId: request.correlationId }, 'falha ao repassar stream de voz');
+            deps.auditLog.record({
+              correlationId: request.correlationId,
+              actorType: 'user',
+              action: 'voice.spoken',
+              outcome: 'failure',
+              details: { characters: body.text!.length, error: message, streamed: true },
+            });
+            controller.error(streamError);
           }
-          controller.close();
-          deps.auditLog.record({
-            correlationId: request.correlationId,
-            actorType: 'user',
-            action: 'voice.spoken',
-            outcome: 'success',
-            details: { characters: body.text!.length, audioBytes, voiceId: voiceConfig.voiceId, streamed: true },
-          });
         },
       });
 

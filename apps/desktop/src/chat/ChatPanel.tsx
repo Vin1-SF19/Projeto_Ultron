@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChatSocket, type ChatSocketStatus } from './chat-socket.js';
 import type { ChatMessage } from './chat-types.js';
-import { synthesizeSpeech, transcribeAudio, VoiceNotConfiguredError } from './voice-client.js';
+import {
+  isMediaSourceStreamingSupported,
+  synthesizeSpeech,
+  synthesizeSpeechStreamingIntoMediaSource,
+  transcribeAudio,
+  VoiceNotConfiguredError,
+} from './voice-client.js';
 import { MicrophonePermissionDeniedError, VoiceRecorder } from './voice-recorder.js';
 import { AmplitudeLipSyncDriver } from './lip-sync.js';
 import './chat.css';
@@ -57,42 +63,110 @@ export function ChatPanel({ onFaceEvent, onMouthOpennessChange }: ChatPanelProps
     onFaceEvent?.('voice.response.ended');
   }
 
+  function playAudioFromUrl(url: string) {
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    setIsSpeaking(true);
+    onFaceEvent?.('voice.response.started');
+    audio.addEventListener('playing', () => {
+      lipSyncRef.current?.start({ audio });
+    });
+    audio.addEventListener('ended', () => {
+      lipSyncRef.current?.stop();
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setIsSpeaking(false);
+      onFaceEvent?.('voice.response.ended');
+    });
+    audio.addEventListener('error', () => {
+      lipSyncRef.current?.stop();
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setIsSpeaking(false);
+      onFaceEvent?.('voice.response.error');
+    });
+    audio.play().catch((error: unknown) => {
+      console.error('Falha ao reproduzir áudio de voz:', error);
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setIsSpeaking(false);
+      onFaceEvent?.('voice.response.error');
+    });
+  }
+
+  /**
+   * Toca a resposta em voz assim que possível: com MediaSource disponível,
+   * o áudio começa a tocar incrementalmente enquanto ainda está sendo
+   * sintetizado (streaming real, seção Fase 7 do prompt mestre). Sem
+   * suporte a MediaSource/audio-mpeg (varia entre WebViews), cai para o
+   * modo anterior — baixar o áudio completo antes de tocar.
+   */
   function speak(text: string) {
-    synthesizeSpeech(text)
-      .then((url) => {
-        const audio = new Audio(url);
-        audioRef.current = audio;
+    if (!isMediaSourceStreamingSupported()) {
+      synthesizeSpeech(text)
+        .then((url) => playAudioFromUrl(url))
+        .catch((error: unknown) => {
+          if (error instanceof VoiceNotConfiguredError) return;
+          onFaceEvent?.('voice.response.error');
+        });
+      return;
+    }
+
+    const mediaSource = new MediaSource();
+    const url = URL.createObjectURL(mediaSource);
+    let started = false;
+
+    mediaSource.addEventListener(
+      'sourceopen',
+      () => {
+        synthesizeSpeechStreamingIntoMediaSource(text, mediaSource).catch((error: unknown) => {
+          if (error instanceof VoiceNotConfiguredError) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          console.warn('Streaming de voz falhou, tentando modo não incremental:', error);
+          URL.revokeObjectURL(url);
+          if (!started) {
+            synthesizeSpeech(text)
+              .then((fallbackUrl) => playAudioFromUrl(fallbackUrl))
+              .catch(() => onFaceEvent?.('voice.response.error'));
+          }
+        });
+      },
+      { once: true },
+    );
+
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.addEventListener(
+      'playing',
+      () => {
+        started = true;
         setIsSpeaking(true);
         onFaceEvent?.('voice.response.started');
-        audio.addEventListener('playing', () => {
-          lipSyncRef.current?.start({ audio });
-        });
-        audio.addEventListener('ended', () => {
-          lipSyncRef.current?.stop();
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setIsSpeaking(false);
-          onFaceEvent?.('voice.response.ended');
-        });
-        audio.addEventListener('error', () => {
-          lipSyncRef.current?.stop();
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setIsSpeaking(false);
-          onFaceEvent?.('voice.response.error');
-        });
-        audio.play().catch((error: unknown) => {
-          console.error('Falha ao reproduzir áudio de voz:', error);
-          URL.revokeObjectURL(url);
-          audioRef.current = null;
-          setIsSpeaking(false);
-          onFaceEvent?.('voice.response.error');
-        });
-      })
-      .catch((error: unknown) => {
-        if (error instanceof VoiceNotConfiguredError) return;
-        onFaceEvent?.('voice.response.error');
-      });
+        lipSyncRef.current?.start({ audio });
+      },
+      { once: true },
+    );
+    audio.addEventListener('ended', () => {
+      lipSyncRef.current?.stop();
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setIsSpeaking(false);
+      onFaceEvent?.('voice.response.ended');
+    });
+    audio.addEventListener('error', () => {
+      lipSyncRef.current?.stop();
+      URL.revokeObjectURL(url);
+      audioRef.current = null;
+      setIsSpeaking(false);
+      if (started) onFaceEvent?.('voice.response.error');
+    });
+    audio.play().catch(() => {
+      // Falha ao iniciar antes dos primeiros chunks chegarem — normal em
+      // alguns navegadores; o listener 'playing' cuidará de iniciar o
+      // estado assim que houver dados suficientes.
+    });
   }
 
   useEffect(() => {
