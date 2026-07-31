@@ -1,8 +1,8 @@
 # STATUS DO PROJETO ULTRON
 
-> Arquivo de continuidade. Se o contexto da conversa for perdido/resetado, leia este arquivo primeiro para saber exatamente onde o trabalho parou e o que fazer a seguir.
+> Arquivo de continuidade. Se o contexto da conversa for perdido/resetado (ou você estiver retomando em outra máquina), leia este arquivo primeiro para saber exatamente onde o trabalho parou e o que fazer a seguir.
 
-Última atualização: 2026-07-29 (fim do dia — Fase 6 concluída)
+Última atualização: 2026-07-31 — Fase 7 (Voz) em andamento, ~85% completa.
 
 ---
 
@@ -12,115 +12,202 @@ Superassistente pessoal/profissional local-first ("Projeto Ultron"), especificad
 
 Resumo rápido: monólito modular local (Tauri 2 + React no desktop, Control Plane em Node + Fastify + WebSocket + SQLite), com adapters para OpenClaw, Ollama, Claude Code, Codex, routers de modelo, ElevenLabs, Gmail, Calendar, WhatsApp, GitHub. 20 fases de implementação.
 
-Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branches `master`/`develop` sincronizadas; `phase/NN-nome` por fase).
+Repositório remoto: https://github.com/Vin1-SF19/Projeto_Ultron.git (branches `master`/`develop` sincronizadas até o commit `77124c0`; branch de trabalho atual `phase/07-voice`, ainda **não mergeada** — ver seção 3).
 
 ---
 
-## 2. ONDE PARAMOS (ESTADO ATUAL)
+## 2. COMO RETOMAR EM OUTRA MÁQUINA (leia isto primeiro)
 
-**FASES 0-6 CONCLUÍDAS.** Todas validadas com testes automatizados E com o app real rodando (Control Plane + dev server/Tauri), não apenas com testes unitários.
+```bash
+git clone https://github.com/Vin1-SF19/Projeto_Ultron.git
+cd Projeto_Ultron
+git checkout develop   # já tem tudo até o fim da Fase 6 + boa parte da Fase 7
+pnpm install
+pnpm -r build
+```
 
-Próxima fase: **FASE 7** (ver [prompt_Inicial.md](prompt_Inicial.md) para o escopo exato — ainda não investigado em detalhe nesta sessão).
+Pré-requisitos de ambiente que a máquina nova vai precisar:
+- **Node.js 22.5+** (usa `node:sqlite` nativo — não precisa instalar `better-sqlite3`).
+- **Rust + Cargo** (para compilar o Tauri) — se for só mexer no Control Plane/lógica, não é necessário.
+- **Visual Studio Build Tools** (Windows) — necessário só para compilar o Tauri.
+- **Ollama** local rodando (`ollama serve`, com pelo menos um modelo baixado, ex. `ollama pull llama3.2:1b`) para testar o chat de texto/voz de ponta a ponta.
+- **Conta ElevenLabs com créditos** — ver alerta crítico na seção 4. Sem crédito, TTS/STT retornam erro real (não simulado) e isso é o comportamento correto, não um bug.
 
-### Resumo por fase
+Para rodar o Control Plane manualmente:
+```bash
+cd apps/control-plane
+node dist/main.js
+# sobe em http://127.0.0.1:4577
+```
+
+Para rodar o app desktop em modo dev:
+```bash
+cd apps/desktop
+pnpm exec vite
+# abre em http://localhost:1420 — mas sem CSP do Tauri (ver ADR-012), então CORS não é 100% representativo do app empacotado
+```
+
+Para buildar o app Tauri real (produção):
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"   # no Windows/Git Bash o cargo pode não estar no PATH do shell não-interativo
+cd apps/desktop
+pnpm tauri build
+# gera apps/desktop/src-tauri/target/release/ultron-desktop.exe
+# e o instalador em .../target/release/bundle/nsis/Ultron_0.1.0_x64-setup.exe
+```
+**Atenção**: se o `.exe` anterior ainda estiver aberto, a build falha com "Acesso negado" ao tentar sobrescrever o arquivo — feche o processo antes (`Get-CimInstance Win32_Process -Filter "Name='ultron-desktop.exe'"` para achar o PID, confirme o `CommandLine` antes de matar).
+
+---
+
+## 3. ONDE PARAMOS EXATAMENTE (ESTADO ATUAL)
+
+**FASES 0-6: 100% COMPLETAS**, mergeadas em `master`/`develop`, com push feito.
+
+**FASE 7 (VOZ): ~85% completa.** Branch `phase/07-voice` tem commits além do que já está em `develop`/`master` — **na verdade, ao reler o histórico, todos os commits da Fase 7 até `77124c0` (streaming de TTS + correção do proxy) já foram mergeados e enviados ao GitHub**. Então `develop`/`master` já refletem o estado mais atual. A branch local `phase/07-voice` está no mesmo commit.
+
+### O que falta para fechar a Fase 7 (em ordem de prioridade)
+
+1. **Testar o streaming de TTS com créditos ElevenLabs disponíveis.** A conta usada nesta sessão ficou sem créditos (`quota_exceeded`, "0 credits remaining") durante os testes manuais. O código foi validado como correto (o erro 502 observado era a mensagem real da API sendo repassada fielmente, não um bug), mas **a validação visual final do áudio tocando incrementalmente via MediaSource não foi 100% concluída** por falta de crédito. Ação: adicionar créditos à conta ElevenLabs (ou trocar de conta/key) e repetir o teste manual: abrir o app, mandar uma mensagem, confirmar que o áudio começa a tocar antes da resposta completa ter sido sintetizada (não precisa de teste automatizado novo — os testes unitários com mocks já cobrem a lógica).
+2. **Task #47 pendente: integrar `Identidade_Ultron.md` como system prompt de personalidade.** O usuário preencheu `Identidade_Ultron.md` (1672 linhas, já commitado na raiz) com a personalidade que o Ultron deve ter. Hoje o único system prompt injetado é a instrução fixa de idioma pt-BR em `apps/control-plane/src/chat-messages.ts` (função `buildChatMessages`). **Falta**: ler `Identidade_Ultron.md`, decidir como resumir/injetar esse conteúdo (provavelmente concatenado à instrução de idioma existente, ou como uma segunda mensagem de sistema), implementar, testar que o Ultron passa a se autodenominar corretamente, e **então apagar `Identidade_Ultron.md` da raiz** (pedido explícito do usuário: "depois que colocar o sistema nele, pode apagar-lo da raiz"). Provavelmente vale mover o conteúdo relevante para dentro do próprio código (`chat-messages.ts` ou um novo arquivo `identity-prompt.ts`) antes de apagar o `.md`.
+3. **Critérios da Fase 7 ainda não verificados/fechados** (ver `prompt_Inicial.md`, seção "FASE 7 — VOZ"):
+   - ✅ push-to-talk (clique único: clica para gravar, clica de novo para parar — funcionalmente equivalente, não é "segurar", usuário não pediu para mudar)
+   - ✅ STT ElevenLabs, TTS ElevenLabs, seleção de voz, fallback textual, interrupção, lip sync (Camada 1), métricas — todos implementados e testados
+   - ✅ streaming (de texto, via WebSocket) — Fase 6; streaming de áudio TTS implementado nesta sessão (ver item 1 acima para validação final)
+   - ⚠️ **transcrição parcial**: NÃO implementada. O endpoint STT da ElevenLabs (`scribe_v1`) usado é request/response (manda o áudio completo, recebe o texto completo) — não há streaming de transcrição parcial enquanto o usuário ainda fala. Verificar se a ElevenLabs oferece isso antes de assumir que não dá para fazer.
+   - ⚠️ **resposta rápida**: depende do modelo Ollama local (`llama3.2:1b` é pequeno mas ainda assim demora alguns segundos para respostas longas) — não é algo resolvível no código, é característica do hardware/modelo escolhido pelo usuário. Não tratar como bug.
+   - ⚠️ **reconexão**: não foi testado explicitamente o cenário "WebSocket cai no meio de uma conversa por voz e reconecta sozinho". O `ChatSocket` (`apps/desktop/src/chat/chat-socket.ts`) já tem lógica de status `connecting/open/closed` mas não tenta reconectar automaticamente após `close` — só reflete o estado. Verificar se isso é suficiente ou se falta reconexão automática com backoff.
+   - ✅ erro tratado, sem bloquear chat, custo registrado — feitos.
+
+### Tarefas registradas no sistema de tasks (para quem retomar via ferramenta de tasks)
+- Task #47 `pending`: Integrar Identidade_Ultron.md como system prompt.
+- Task #51 `in_progress`: Revisar critérios restantes da Fase 7 (streaming de áudio, reconexão, erro tratado) — ver itens acima.
+- Task #52 `in_progress`: Streaming real de TTS via MediaSource — **código completo, só falta validação final com créditos ElevenLabs** (ver item 1 acima). Pode ser marcada como concluída assim que a validação visual passar.
+
+---
+
+## 4. ALERTAS CRÍTICOS PARA A PRÓXIMA SESSÃO
+
+### 🔴 Créditos da ElevenLabs esgotados
+A conta ElevenLabs usada nesta sessão (chave salva no Windows Credential Manager como `ultron:voice:elevenlabs`) ficou com **0 créditos restantes** ("quota_exceeded") durante os testes desta sessão. TTS e STT vão falhar com erro real até que:
+- a conta seja recarregada, ou
+- uma nova chave/conta seja configurada via `PUT /api/v1/settings/voice`.
+
+Isso **não é um bug** — o Control Plane trata e reporta esse erro corretamente (`voice_synthesis_failed` / `voice_transcription_failed` com a mensagem real da ElevenLabs). Não gastar tempo "depurando" isso: só trocar/recarregar a credencial.
+
+### 🔴 Identidade_Ultron.md ainda na raiz, ainda não integrado
+Arquivo com 1672 linhas, contém a personalidade/system prompt que o usuário quer para o Ultron. **Não foi lido nem integrado ao código ainda.** O usuário pediu explicitamente para apagá-lo da raiz depois de integrado — não apagar antes disso.
+
+### 🟡 Windows Application Control pode bloquear o .exe não assinado
+Pendência antiga (desde a Fase 5), o usuário mesmo disse "isso a gente vê depois" — relevante só quando chegar na Fase 18 (empacotamento/assinatura de código). Não é bloqueante agora.
+
+### 🟡 Ambiente de preview/browser automatizado não tem microfone real
+Se estiver usando um agente com browser automatizado para testar, ele não consegue testar a gravação de voz de verdade (getUserMedia é bloqueado no sandbox) — isso precisa ser validado manualmente pelo usuário no app real.
+
+---
+
+## 5. RESUMO POR FASE
+
 - **Fase 0**: auditoria de 6 projetos de referência, arquitetura, threat model, ADRs 001-004.
 - **Fase 1**: monorepo, Control Plane (Fastify+WebSocket+SQLite), app Tauri mínimo.
 - **Fase 2**: Event Bus, Audit Log, erros padronizados, correlation IDs, replay por cursor.
-- **Fase 3**: OpenClaw Adapter, testado contra Gateway real instalado nesta sessão.
+- **Fase 3**: OpenClaw Adapter, testado contra Gateway real.
 - **Fase 4**: RoutingEngine com fallback/circuit breaker, Ollama local testado com inferência real.
-- **Fase 5**: keychain (`SecretStore`), configuração de providers em runtime (incl. Ollama remoto do usuário), sistema de autonomia/permissões, seleção de pasta de projeto, onboarding com UI retomável — **tudo validado rodando o app real**.
-- **Fase 6**: streaming real de tokens (Ollama NDJSON + OpenAI-compatible SSE) via WebSocket, rosto SVG original com 14 estados reagindo a eventos reais, layout de Home em 3 colunas, chat funcional com Markdown/histórico/streaming, estado offline/reconexão — **validado com o dev server real + Ollama local rodando de verdade (não só mocks)**.
+- **Fase 5**: keychain (`SecretStore`), configuração de providers em runtime, sistema de autonomia/permissões, seleção de pasta de projeto, onboarding com UI retomável.
+- **Fase 6**: streaming real de tokens (WebSocket), rosto SVG original com 14 estados + partículas, layout de Home em 3 colunas, chat funcional, modo de conversa por voz contínua como padrão (chat de texto oculto, habilitável via toggle).
+- **Fase 7 (em andamento)**: voz completa via ElevenLabs — ver detalhes abaixo.
 
-### Checklist Fase 6 (completa)
-- [x] `packages/ollama-adapter` e `packages/openai-compatible-adapter`: `executeStream()` consumindo o protocolo nativo de streaming de cada provider (NDJSON e SSE respectivamente), em vez de simular incrementalidade.
-- [x] `NativeRoutingEngine.stream()`: usa `executeStream` do adapter quando disponível; cai para token único (resposta inteira) quando o adapter não suporta — nunca finge granularidade que não existe.
-- [x] Control Plane `/ws`: protocolo `model_stream_start`/`model_stream_token`/`model_stream_done`/`model_stream_error`/`model_stream_cancel`, reaproveitando o WebSocket já existente (sem SSE dedicado).
-- [x] `apps/desktop/src/face/`: `Face.tsx` (SVG original, 14 estados obrigatórios da seção 24), `face-state.ts`, `event-to-face-state.ts` (mapeamento de eventos reais → estado, nunca decorativo). Respiração sutil, piscadas, `prefers-reduced-motion`, modo sem animação, opção de ocultar rosto.
-- [x] `apps/desktop/src/chat/`: `ChatSocket` (cliente do protocolo `model_stream_*`), `ChatPanel.tsx` (Markdown via `react-markdown`, histórico em memória, indicador de provider/modelo, banner de desconexão).
-- [x] `apps/desktop/src/home/Home.tsx`: layout de 3 colunas (navegação lateral estática + rosto/chat central + "seu dia" à direita como placeholder honesto, nunca com dados de exemplo). `ProjectsPanel` (Fase 5) reaproveitado dentro da coluna direita até existir roteamento real de navegação.
-- [x] `App.tsx`: decide entre diagnóstico (desconectado) / Onboarding (não concluído) / Home (conectado + onboarding `done`).
-- [x] 46 novos testes automatizados (25 no desktop + 3 de streaming no control-plane + 6 nos adapters + 3 no routing-engine + outros), todos passando; build/lint/typecheck limpos em todo o monorepo.
-- [x] Validado no dev server real com Ollama local: mensagem enviada, tokens chegando incrementalmente (confirmado via WS real, não mock), rosto reagindo thinking → speaking → success, banner "Control Plane desconectado — reconectando…" aparecendo ao derrubar o Control Plane com a Home já aberta.
+### Checklist Fase 7 (detalhado)
 
-### O que existe hoje no ambiente (importante para continuar)
-- **Ollama local** instalado, rodando, com `llama3.2:1b`.
-- **Ollama remoto do usuário** configurável via `POST /api/v1/providers/config` (não fica persistido entre reinícios de banco limpo — reconfigurar quando necessário; token não deve ser reexibido em log/terminal).
-- **OpenClaw CLI** instalado; Gateway pode ou não estar rodando em background — checar com `openclaw gateway status`.
-- **Rust, Cargo, Visual Studio Build Tools** instalados.
-- **Windows Application Control**: o usuário desativou uma política que bloqueava a execução do `.exe` de debug recém-compilado. Isso pode precisar ser revisitado para produção/distribuição real (usuário sinalizou "ver depois" — ficou registrado como pendência de UX/distribuição, não uma tarefa de fase específica ainda).
+**Backend (`apps/control-plane`, `packages/elevenlabs-adapter`)**
+- [x] `packages/elevenlabs-adapter`: cliente HTTP para `/v1/voices`, `/v1/text-to-speech`, `/v1/text-to-speech/{id}/stream` (streaming real, confirmado chunked), `/v1/speech-to-text`.
+- [x] `VoiceConfigStore`: persiste `voiceId`/`voiceName` no SQLite (migration `007_voice_config`), apiKey só no keychain.
+- [x] Endpoints: `GET/PUT /api/v1/settings/voice`, `GET /api/v1/voices`, `POST /api/v1/voice/speak`, `POST /api/v1/voice/speak/stream` (proxy chunked sem bufferizar), `POST /api/v1/voice/transcribe`.
+- [x] Métricas reais no `AuditLog`: caracteres enviados, bytes de áudio recebidos/enviados, `voiceId` usado — nunca custo monetário inventado.
+- [x] Bug corrigido: erros dentro do `start()` assíncrono do `ReadableStream` de proxy não caíam no `try/catch` externo (viravam unhandled rejection) — agora capturado e propagado via `controller.error()`.
 
-### Checklist Fase 5 (completa, incluindo o que ficou pendente antes)
-- [x] `packages/security`: `SecretStore` via `@napi-rs/keyring` (ADR-010), `redactSensitiveKeys`.
-- [x] `packages/openai-compatible-adapter`: adapter genérico para qualquer `/v1` compatível OpenAI.
-- [x] `ProviderConfigStore`: persistência SQLite (metadados) + keychain (segredo) para providers configurados pelo usuário.
-- [x] Sistema de autonomia: `packages/contracts/approval.ts` (4 níveis + regras de autonomia delimitada), migration `004_autonomy_config`, `AutonomyConfigStore`, endpoints `GET/PUT /api/v1/settings/autonomy`.
-- [x] Seleção de pasta de projeto: `ProjectStore` (validação real de caminho/permissões, nunca escaneia disco às cegas), migration `005_projects`, endpoints `GET/POST/DELETE /api/v1/projects`, `@tauri-apps/plugin-dialog` integrado no desktop (`ProjectsPanel.tsx`).
-- [x] Onboarding com UI: `packages/contracts/onboarding.ts`, migration `006_onboarding_progress`, `OnboardingStore` (retomável — persiste `currentStep`/`completedSteps`), endpoints `GET /api/v1/onboarding`, `POST /api/v1/onboarding/advance`, `POST /api/v1/onboarding/reset`. Componente `Onboarding.tsx` no desktop com as 9 etapas reais (welcome, diagnostics, assistant, models, openclaw, projects, integrations, security, test) — cada etapa usa dados reais do Control Plane, nenhuma simulada.
-- [x] **Bug real encontrado e corrigido em produção**: CORS ausente no Control Plane impedia qualquer chamada do app empaconhado (origem `http://tauri.localhost`) além de `/health` — só descoberto ao testar o app de verdade (não pego pelos testes automatizados, que usam `app.inject()` e não simulam CORS de browser). Corrigido com `@fastify/cors` (ADR-012), 2 testes novos, validado no app real pelo usuário.
-- [x] 100 testes automatizados (10 pacotes), lint/typecheck/build limpos.
+**Frontend (`apps/desktop`)**
+- [x] `voice-client.ts`: `synthesizeSpeech` (não-streaming), `synthesizeSpeechStreamingIntoMediaSource` (streaming via MediaSource Extensions), `isMediaSourceStreamingSupported()`, `transcribeAudio`.
+- [x] `voice-recorder.ts`: `VoiceRecorder` (captura de microfone via `MediaRecorder`, sem exigir permissão adicional do Tauri — o WebView2/WKWebView cuida disso nativamente).
+- [x] `lip-sync.ts`: `AmplitudeLipSyncDriver` — mede amplitude real do áudio via Web Audio `AnalyserNode`, controla a abertura da boca do rosto. **Usa `setInterval`, não `requestAnimationFrame`** — bug real encontrado e corrigido nesta sessão: rAF é pausado pelo navegador quando a janela perde o foco, congelando a boca (o áudio continuava tocando normalmente).
+- [x] `Face.tsx`: ganhou uma boca (elemento que não existia no design anterior), controlada por prop `mouthOpenness`.
+- [x] `ChatPanel.tsx`: modo de conversa por voz contínua (fala → transcreve → envia automaticamente → Ultron responde falando), botão "Parar de falar" + interrupção automática ao clicar no microfone enquanto o Ultron fala, streaming de TTS com fallback automático para modo não-incremental quando MediaSource não é suportado.
+- [x] Correção de CSP: `media-src 'self' blob:` adicionado a `tauri.conf.json` — sem isso, o áudio nunca tocava no app empacotado (bug real reportado pelo usuário e corrigido).
 
-## 3. LIÇÕES DE DIAGNÓSTICO DESTA SESSÃO (importantes para não repetir investigação)
+**Testes**: 135 testes automatizados no total no monorepo, todos passando. Build/lint/typecheck limpos em todos os pacotes.
 
-1. **"Failed to fetch" no app Tauri empacotado quase sempre é CORS**, não CSP — a origem real do WebView2 em build de produção é `http://tauri.localhost` (Windows) / `tauri://localhost` (outras plataformas), diferente de `http://localhost:1420` do dev server. Testar com `curl -H "Origin: http://tauri.localhost"` para reproduzir sem precisar abrir o app.
-2. `app.inject()` do Fastify **não simula CORS** — um endpoint pode passar em todos os testes automatizados e ainda assim falhar no browser real por falta de CORS. Sempre que adicionar/mudar rotas, também validar manualmente no app real quando possível.
-3. Ao investigar comportamento "grudado" numa versão antiga do frontend, checar (em ordem de probabilidade real observada): (a) se o `dist/` foi rebuildado e o `.exe` recompilado *depois* dessa build (senão o Tauri empacota um `dist/` antigo), (b) CORS, (c) só por último o cache do WebView2 em `~/AppData/Local/<identifier>/EBWebView` — nesta sessão essa hipótese foi tentada e não era a causa, mas vale descartar rápido com um `rm -rf`.
-4. **Antes de encerrar qualquer processo por PID, sempre confirmar via `Get-CimInstance Win32_Process | Select ProcessId, CommandLine`** — nesta sessão isso preveniu matar acidentalmente processos do editor Cursor do usuário.
+---
 
-## 4. DECISÕES TOMADAS (ADRs)
+## 6. LIÇÕES DE DIAGNÓSTICO DESTA SESSÃO (para não repetir investigação)
 
-ADR-001 a ADR-012 — ver [docs/adr/](docs/adr/). Destaques recentes: **ADR-010** (keychain), **ADR-011** (providers configurados em runtime), **ADR-012** (CORS para origem do app desktop). Nenhum ADR novo foi necessário na Fase 6 (decisão de reaproveitar o `/ws` existente em vez de SSE dedicado foi registrada só no commit, por ser reversível e de baixo impacto arquitetural).
+1. **"Failed to fetch" ou áudio que não toca no app Tauri empacotado quase sempre é CORS ou CSP**, não um bug de lógica. CORS: origem real do WebView2 em produção é `http://tauri.localhost` (Windows) / `tauri://localhost` (outras plataformas). CSP: precisa de `media-src 'self' blob:` para o `<audio>` tocar blob URLs (descoberto nesta sessão — o TTS "funcionava" no backend mas o áudio nunca tocava no app real).
+2. **`app.inject()` do Fastify não simula CORS nem CSP** — sempre validar manualmente no app real para bugs desse tipo.
+3. **`requestAnimationFrame` é pausado pelo navegador quando a janela perde o foco** — qualquer lógica de animação/medição que precise continuar rodando em background (como o lip sync) deve usar `setInterval` em vez de rAF.
+4. **Erros dentro do `start()` de um `ReadableStream` custom não propagam automaticamente** para quem consome o stream — sempre envolver em `try/catch` e chamar `controller.error(e)` explicitamente, senão vira unhandled rejection silencioso.
+5. **Ao investigar um "502" ou erro genérico de proxy, sempre olhar o corpo real da resposta antes de suspeitar de bug de concorrência/timing** — nesta sessão, um 502 que parecia ser bug de streaming era na verdade a API upstream (ElevenLabs) reportando `quota_exceeded` de forma legítima.
+6. **`vi.stubGlobal('navigator', {...})` substitui o objeto inteiro** e pode vazar entre testes de forma sutil (quebra o cleanup de outros componentes que dependem de outras props do `navigator`). Preferir `Object.defineProperty(navigator, 'mediaDevices', {configurable: true, value: ...})` para stubar só a propriedade necessária.
+7. **No Git Bash do Windows, `cargo`/`rustc` podem não estar no `$PATH`** mesmo estando instalados e funcionando no PowerShell — usar `export PATH="$HOME/.cargo/bin:$PATH"` antes de rodar `pnpm tauri build` via Bash.
+8. **Notificações de conclusão de comandos em background podem reportar "completed"/exit 0 mesmo quando o comando teve exit code diferente de 0** — sempre ler o arquivo de output real e procurar a linha de sucesso/erro esperada, nunca confiar só no resumo da notificação.
+9. **Antes de encerrar qualquer processo por PID, sempre confirmar via `Get-CimInstance Win32_Process | Select ProcessId, CommandLine`.**
 
-## 5. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
+---
+
+## 7. DECISÕES TOMADAS (ADRs)
+
+ADR-001 a ADR-012 — ver [docs/adr/](docs/adr/). Nenhum ADR novo foi criado na Fase 7 até agora (decisões de streaming de TTS via MediaSource e lip sync via setInterval foram registradas nas mensagens de commit, por serem reversíveis/implementação, não arquitetura).
+
+---
+
+## 8. ESTRUTURA DE CÓDIGO ATUAL (para orientação rápida)
 
 ```text
 packages/
-  contracts/           + approval.ts, project.ts, onboarding.ts (Fase 5)
-  security/            SecretStore, redactSensitiveKeys
-  model-gateway/        model-provider.ts agora com executeStream?() opcional; native-routing-engine.ts com stream() real
-  ollama-adapter/        ollama-client.ts com chatStream() (NDJSON); ollama-adapter.ts com executeStream()
-  openai-compatible-adapter/  openai-compatible-client.ts com chatStream() (SSE); adapter com executeStream()
-  database/             + migrations 003 (providers), 004 (autonomy_config), 005 (projects), 006 (onboarding_progress)
+  elevenlabs-adapter/    NOVO (Fase 7) — cliente HTTP para voz (voices, TTS, TTS stream, STT)
+  contracts/src/voice.ts NOVO (Fase 7) — VoiceConfig, VoiceOption
+  database/migrations/007_voice_config.ts  NOVO (Fase 7)
 
 apps/control-plane/src/
-  server.ts             + CORS (@fastify/cors), endpoints de onboarding/projects/settings/autonomy/providers/config
-                         + /ws com protocolo model_stream_start/token/done/error/cancel (Fase 6)
-  provider-config-store.ts, autonomy-config-store.ts, project-store.ts, onboarding-store.ts  (Fase 5)
-  main.ts               instancia todos os stores acima, recarrega providers configurados no boot
+  voice-config-store.ts  NOVO (Fase 7) — persiste config de voz (SQLite + keychain)
+  chat-messages.ts       instrução de idioma pt-BR injetada em toda mensagem — AQUI vai a identidade também (task #47)
+  server.ts              + endpoints /api/v1/settings/voice, /api/v1/voices, /api/v1/voice/speak(/stream), /api/v1/voice/transcribe
 
 apps/desktop/src/
-  face/                  NOVO (Fase 6) — Face.tsx (SVG, 14 estados), face-state.ts, event-to-face-state.ts
-  chat/                  NOVO (Fase 6) — ChatSocket (cliente do /ws), ChatPanel.tsx (Markdown/streaming)
-  home/                  NOVO (Fase 6) — Home.tsx (layout 3 colunas: nav + rosto/chat + "seu dia")
-  Onboarding.tsx         wizard de 9 etapas, retomável (Fase 5)
-  ProjectsPanel.tsx      seletor nativo de pasta (Tauri dialog) + lista de projetos (Fase 5), agora dentro da Home
-  App.tsx                decide entre diagnóstico / Onboarding / Home com base no estado real
-  control-plane-client.ts  cliente HTTP tipado (REST); streaming vive em chat/chat-socket.ts (WS)
+  chat/voice-client.ts   síntese/transcrição de voz, incl. streaming via MediaSource
+  chat/voice-recorder.ts captura de microfone
+  chat/lip-sync.ts       AmplitudeLipSyncDriver (Web Audio API + setInterval)
+  chat/ChatPanel.tsx     modo de conversa por voz contínua, interrupção, streaming de TTS
+  face/Face.tsx          + boca controlada por mouthOpenness
 ```
 
-## 6. PRÓXIMOS PASSOS IMEDIATOS (ordem)
+---
 
-1. **Merge da Fase 6**: branch `phase/06-home-chat-face` → `develop` → `master`, push (ainda não feito nesta sessão — só commits locais).
-2. Ler a seção correspondente à **Fase 7** em [prompt_Inicial.md](prompt_Inicial.md) e planejar as tarefas antes de começar a codar.
-3. Pendência de UX/distribuição ainda não resolvida (ver seção 2 abaixo): bloqueio do Windows Application Control sobre o `.exe` não assinado — usuário sinalizou "ver depois", possivelmente relevante na Fase 18 (empacotamento/assinatura de código).
-4. Continuar validando cada entrega visual rodando o app real (dev server ou Tauri) — testes automatizados sozinhos não garantem que o app funciona de verdade (lição reconfirmada nesta fase: o comportamento de streaming e o banner de desconexão só foram validados com confiança total ao rodar o Control Plane e o Ollama de verdade, não só com mocks).
+## 9. PRÓXIMOS PASSOS IMEDIATOS (ordem sugerida)
 
-## 7. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
+1. Recarregar créditos da conta ElevenLabs (ou trocar de chave) e validar visualmente o streaming de TTS de ponta a ponta no app real.
+2. Ler `Identidade_Ultron.md`, decidir a estratégia de integração (provavelmente resumir/injetar no `chat-messages.ts`), implementar, testar, depois apagar o `.md` da raiz.
+3. Decidir/testar reconexão automática do WebSocket (`chat-socket.ts`) e transcrição parcial (verificar se a ElevenLabs oferece streaming de STT).
+4. Fechar a Fase 7 (marcar tasks #47, #51, #52 como completas), fazer merge final para `develop`/`master`, push.
+5. Ler a seção "FASE 8 — FILA PERSISTENTE" em `prompt_Inicial.md` e planejar antes de começar a codar.
+
+---
+
+## 10. REGRAS DE OURO (não esquecer em nenhuma sessão futura)
 
 - Nunca instalar componentes de sistema sem confirmação explícita, salvo janela de autonomia vigente e específica.
-- **Credenciais de provider pago/serviço externo são SEMPRE bloqueantes** — tratar com máximo cuidado quando fornecidas (nunca reexibir em terminal/log).
+- **Credenciais de provider pago/serviço externo são SEMPRE bloqueantes** — tratar com máximo cuidado quando fornecidas (nunca reexibir em terminal/log). Chaves da sessão ficam salvas apenas no keychain do SO, nunca em texto plano no banco/repositório.
 - Nunca inventar que um comando funcionou — sempre registrar comando, resultado, exit code, erro real.
-- **Antes de encerrar qualquer processo por PID, inspecionar o `CommandLine` completo** — nunca assumir que todo `node.exe`/processo é seu.
+- **Antes de encerrar qualquer processo por PID, inspecionar o `CommandLine` completo.**
 - Antes de usar qualquer SDK/pacote de terceiro, verificar com `npm view` que a versão real existe e não é um placeholder.
 - Um evento nunca deve ser publicado no EventBus antes de estar persistido no Event Store.
 - Toda resposta de erro da API segue o envelope `{ error: { code, message, correlationId, details? } }`.
 - Toda integração externa é opcional e desligada por padrão.
 - Nunca encadear dois routers de modelo no mesmo caminho de requisição.
 - Nunca instalar/baixar modelo local automaticamente sem confirmação.
-- Nunca inventar custo de provider — quando desconhecido, `estimatedCost` fica `undefined`.
-- Identidade visual do Ultron deve ser 100% original — ícone atual é placeholder neutro.
-- **App Tauri empacotado roda sob origem `http://tauri.localhost`/`tauri://localhost` — todo novo endpoint do Control Plane precisa estar coberto pela lista de CORS em `ALLOWED_ORIGINS` (server.ts) e, se usar método novo (além de GET/POST/PUT/DELETE), declarar em `methods` no registro do plugin CORS.**
-- Testes automatizados com `app.inject()` não substituem validação manual no app real para bugs de CORS/rede/browser.
+- Nunca inventar custo de provider — quando desconhecido, `estimatedCost` fica `undefined`. Métricas de voz registram unidades reais (caracteres, bytes), nunca R$/USD estimado.
+- Identidade visual do Ultron deve ser 100% original — ícone oficial já gerado a partir da arte do usuário (Fase 5).
+- **App Tauri empacotado roda sob origem `http://tauri.localhost`/`tauri://localhost`** — todo novo endpoint do Control Plane precisa estar coberto pela lista de CORS em `ALLOWED_ORIGINS` (server.ts), e a CSP em `tauri.conf.json` precisa cobrir qualquer novo tipo de recurso (ex: `media-src` para áudio).
+- Testes automatizados com `app.inject()` não substituem validação manual no app real para bugs de CORS/CSP/rede/browser/foco de janela.
+- Sempre rebuildar (`pnpm --filter <pacote> build`) pacotes internos consumidos via `dist/` antes de testar mudanças neles refletidas em outro pacote.
 
 ---
 
-*Atualize este arquivo ao final de cada fase concluída ou sempre que houver uma mudança relevante de direção, para que qualquer sessão futura possa retomar o trabalho sem perda de contexto.*
+*Atualize este arquivo ao final de cada fase concluída ou sempre que houver uma mudança relevante de direção, para que qualquer sessão futura (nesta máquina ou em outra) possa retomar o trabalho sem perda de contexto.*
